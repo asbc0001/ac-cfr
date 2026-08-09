@@ -9,8 +9,15 @@ description = "Counterfactual regret minimisation poker research project"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib==3.11.1",
     "numpy==2.5.1",
 ]
+
+[project.scripts]
+ac-cfr-train = "ac_cfr.cli.train:main"
+ac-cfr-benchmark = "ac_cfr.cli.benchmark:main"
+ac-cfr-evaluate = "ac_cfr.cli.evaluate:main"
+ac-cfr-plot-results = "ac_cfr.cli.plot_results:main"
 
 [project.optional-dependencies]
 dev = [

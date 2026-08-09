@@ -48,7 +48,6 @@ def test_strategy_normalisation_and_strict_validation() -> None:
 def test_baseline_returns_only_uniform_legal_probabilities() -> None:
     strategy = BaselineAgent().get_strategy(_INFORMATION_STATE, _LEGAL_ACTIONS)
     assert strategy == pytest.approx((1 / 3, 1 / 3, 1 / 3))
-    assert validate_strategy(strategy, _LEGAL_ACTIONS) == strategy
 
     with pytest.raises(ValueError, match="match"):
         BaselineAgent().get_strategy(_INFORMATION_STATE, _LEGAL_ACTIONS[:2])

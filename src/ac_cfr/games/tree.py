@@ -45,6 +45,9 @@ class IndexedGameTree:
     information_set_action_offsets: NDArray[np.int32]
     information_set_action_counts: NDArray[np.uint8]
     information_set_actions: NDArray[np.uint8]
+    information_set_encoding_offsets: NDArray[np.int32]
+    information_set_encoding_counts: NDArray[np.uint8]
+    information_set_encodings: NDArray[np.int16]
     information_set_member_offsets: NDArray[np.int32]
     information_set_member_counts: NDArray[np.int32]
     information_set_members: NDArray[np.int32]
@@ -68,6 +71,7 @@ class IndexedGameTree:
 @dataclass(slots=True)
 class _InformationSetRecord:
     player: int
+    encoding: tuple[int, ...]
     legal_actions: tuple[Action, ...]
     members: list[int]
 
@@ -117,7 +121,12 @@ class _TreeCompiler:
         information_set_id = self.information_set_registry.assign(key)
         if information_set_id == len(self.information_sets):
             self.information_sets.append(
-                _InformationSetRecord(player, information_state.legal_actions, [node_id])
+                _InformationSetRecord(
+                    player,
+                    information_state.encoding,
+                    information_state.legal_actions,
+                    [node_id],
+                )
             )
         else:
             record = self.information_sets[information_set_id]
@@ -156,6 +165,9 @@ class _TreeCompiler:
         action_offsets, action_counts, actions = _flatten_information_set_actions(
             self.information_sets
         )
+        encoding_offsets, encoding_counts, encodings = _flatten_information_set_encodings(
+            self.information_sets
+        )
         member_offsets, member_counts, members = _flatten_information_set_members(
             self.information_sets
         )
@@ -184,6 +196,9 @@ class _TreeCompiler:
             information_set_action_offsets=_read_only(action_offsets, np.int32),
             information_set_action_counts=_read_only(action_counts, np.uint8),
             information_set_actions=_read_only(actions, np.uint8),
+            information_set_encoding_offsets=_read_only(encoding_offsets, np.int32),
+            information_set_encoding_counts=_read_only(encoding_counts, np.uint8),
+            information_set_encodings=_read_only(encodings, np.int16),
             information_set_member_offsets=_read_only(member_offsets, np.int32),
             information_set_member_counts=_read_only(member_counts, np.int32),
             information_set_members=_read_only(members, np.int32),
@@ -239,6 +254,19 @@ def _flatten_information_set_members(
         counts.append(len(record.members))
         members.extend(record.members)
     return offsets, counts, members
+
+
+def _flatten_information_set_encodings(
+    records: list[_InformationSetRecord],
+) -> tuple[list[int], list[int], list[int]]:
+    offsets: list[int] = []
+    counts: list[int] = []
+    encodings: list[int] = []
+    for record in records:
+        offsets.append(len(encodings))
+        counts.append(len(record.encoding))
+        encodings.extend(record.encoding)
+    return offsets, counts, encodings
 
 
 def _read_only[ScalarType: np.generic](

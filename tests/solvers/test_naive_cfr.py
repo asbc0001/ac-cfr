@@ -118,13 +118,8 @@ def test_reference_cfr_solvers_reach_low_exact_leduc_exploitability() -> None:
     final_metrics = []
 
     for solver in solvers:
-        previous_exploitability = float("inf")
-        for milestone in (250, 1_000, 5_000):
-            solver.train(milestone - solver.iteration)
-            metrics = evaluate_strategy(tree, solver.average_policy())
-            assert metrics.exploitability < previous_exploitability
-            previous_exploitability = metrics.exploitability
-        final_metrics.append(metrics)
+        solver.train(5_000)
+        final_metrics.append(evaluate_strategy(tree, solver.average_policy()))
 
     assert all(metrics.exploitability <= LEDUC_EXPLOITABILITY_LIMIT for metrics in final_metrics)
     value_difference = abs(

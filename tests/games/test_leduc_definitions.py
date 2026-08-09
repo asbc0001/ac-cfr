@@ -38,9 +38,6 @@ def test_leduc_deck_retains_all_six_physical_cards() -> None:
     decoded_cards = {(card_rank(card), card_suit(card)) for card in LEDUC_DECK}
     expected_cards = {(rank, suit) for rank in LeducRank for suit in LeducSuit}
     assert decoded_cards == expected_cards
-
-
-def test_leduc_card_encoding_round_trips() -> None:
     for rank in LeducRank:
         for suit in LeducSuit:
             card = encode_card(rank, suit)

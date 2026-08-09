@@ -99,9 +99,6 @@ def test_information_state_is_immutable_player_visible_data() -> None:
     assert information_state.encoding == (2, 1, 0)
     with pytest.raises(FrozenInstanceError):
         information_state.player = 1  # type: ignore[misc]
-
-
-def test_information_state_rejects_non_integer_encodings() -> None:
     with pytest.raises(TypeError, match="encoding values"):
         InformationState(
             game_id=GameId.KUHN,

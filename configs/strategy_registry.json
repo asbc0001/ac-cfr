@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "strategies": [
+    {
+      "strategy_id": "kuhn_random",
+      "label": "Random / untrained",
+      "game": "kuhn",
+      "game_version": "kuhn",
+      "algorithm": "uniform_random",
+      "agent_type": "baseline",
+      "snapshot_id": null,
+      "training_iteration": 0,
+      "local_path": null,
+      "evaluation": {},
+      "model_config_id": "uniform_random",
+      "state_encoding": "kuhn",
+      "action_space": "poker",
+      "tree_digest": null,
+      "artifact_schema_version": null,
+      "release_id": null,
+      "file_size": null,
+      "sha256": null
+    },
+    {
+      "strategy_id": "leduc_random",
+      "label": "Random / untrained",
+      "game": "leduc",
+      "game_version": "leduc",
+      "algorithm": "uniform_random",
+      "agent_type": "baseline",
+      "snapshot_id": null,
+      "training_iteration": 0,
+      "local_path": null,
+      "evaluation": {},
+      "model_config_id": "uniform_random",
+      "state_encoding": "leduc",
+      "action_space": "poker",
+      "tree_digest": null,
+      "artifact_schema_version": null,
+      "release_id": null,
+      "file_size": null,
+      "sha256": null
+    }
+  ]
+}

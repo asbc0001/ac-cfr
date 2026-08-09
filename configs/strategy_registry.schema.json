@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AC CFR strategy registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "strategies"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "strategies": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/strategy"}
+    }
+  },
+  "$defs": {
+    "nullableString": {"type": ["string", "null"]},
+    "nullableInteger": {"type": ["integer", "null"]},
+    "strategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy_id",
+        "label",
+        "game",
+        "game_version",
+        "algorithm",
+        "agent_type",
+        "snapshot_id",
+        "training_iteration",
+        "local_path",
+        "evaluation",
+        "model_config_id",
+        "state_encoding",
+        "action_space",
+        "tree_digest",
+        "artifact_schema_version",
+        "release_id",
+        "file_size",
+        "sha256"
+      ],
+      "properties": {
+        "strategy_id": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "game": {"enum": ["kuhn", "leduc"]},
+        "game_version": {"type": "string", "minLength": 1},
+        "algorithm": {"type": "string", "minLength": 1},
+        "agent_type": {"enum": ["baseline", "tabular"]},
+        "snapshot_id": {"$ref": "#/$defs/nullableString"},
+        "training_iteration": {"type": "integer", "minimum": 0},
+        "local_path": {"$ref": "#/$defs/nullableString"},
+        "evaluation": {"type": "object"},
+        "model_config_id": {"type": "string", "minLength": 1},
+        "state_encoding": {"type": "string", "minLength": 1},
+        "action_space": {"type": "string", "minLength": 1},
+        "tree_digest": {"$ref": "#/$defs/nullableString"},
+        "artifact_schema_version": {"$ref": "#/$defs/nullableInteger"},
+        "release_id": {"$ref": "#/$defs/nullableString"},
+        "file_size": {"$ref": "#/$defs/nullableInteger"},
+        "sha256": {"$ref": "#/$defs/nullableString"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"agent_type": {"const": "baseline"}}},
+          "then": {
+            "properties": {
+              "snapshot_id": {"type": "null"},
+              "local_path": {"type": "null"},
+              "tree_digest": {"type": "null"},
+              "artifact_schema_version": {"type": "null"},
+              "release_id": {"type": "null"},
+              "file_size": {"type": "null"},
+              "sha256": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"agent_type": {"const": "tabular"}}},
+          "then": {
+            "properties": {
+              "snapshot_id": {"type": "string", "minLength": 1},
+              "local_path": {"type": "string", "pattern": "^artifacts/.+"},
+              "tree_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "artifact_schema_version": {"const": 1},
+              "release_id": {"type": "string", "minLength": 1},
+              "file_size": {"type": "integer", "minimum": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

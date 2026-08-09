@@ -20,9 +20,6 @@ def test_canonical_kuhn_rules_and_utility_scale_are_fixed() -> None:
     assert configuration.max_bets_per_round == 1
     assert configuration.starting_player == 0
     assert configuration.player_zero_equilibrium_value == Fraction(-1, 18)
-
-
-def test_kuhn_deck_is_ordered_from_jack_to_king() -> None:
     assert KUHN_DECK == (KuhnCard.JACK, KuhnCard.QUEEN, KuhnCard.KING)
     assert tuple(int(card) for card in KUHN_DECK) == (0, 1, 2)
 

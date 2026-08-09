@@ -60,6 +60,28 @@ class NaiveCFR:
         average_policy = tuple(_normalise(weights) for weights in self._strategy_sum)
         return self._flatten_policy(average_policy)
 
+    def restore_training_state(
+        self,
+        *,
+        iteration: int,
+        regret_sum: NDArray[np.float64],
+        strategy_sum: NDArray[np.float64],
+    ) -> None:
+        """Restore fully validated tabular state from a compatible checkpoint."""
+        _validate_non_negative_integer("iteration", iteration)
+        restored_regrets = self._validated_table(regret_sum, "regret_sum", non_negative=False)
+        restored_strategies = self._validated_table(
+            strategy_sum,
+            "strategy_sum",
+            non_negative=True,
+        )
+        self._validate_restored_regrets(restored_regrets)
+
+        self._iteration = iteration
+        self._regret_sum = restored_regrets
+        self._strategy_sum = restored_strategies
+        self._current_policy = self._regret_matched_policy()
+
     def _run_player_pass(self, traverser: int, averaging_weight: float) -> None:
         # This immutable tuple is the only policy read during the complete pass.
         frozen_policy = self._current_policy
@@ -206,6 +228,9 @@ class NaiveCFR:
     def _averaging_weight(self, iteration: int) -> float:
         return 1.0
 
+    def _validate_restored_regrets(self, regrets: list[list[float]]) -> None:
+        return
+
     def _regret_matched_policy(self) -> tuple[tuple[float, ...], ...]:
         return tuple(
             _normalise(tuple(max(regret, 0.0) for regret in regrets))
@@ -216,6 +241,33 @@ class NaiveCFR:
         return [
             [0.0] * int(action_count) for action_count in self._tree.information_set_action_counts
         ]
+
+    def _validated_table(
+        self,
+        values: NDArray[np.float64],
+        name: str,
+        *,
+        non_negative: bool,
+    ) -> list[list[float]]:
+        if not isinstance(values, np.ndarray):
+            raise TypeError(f"{name} must be a NumPy array")
+        expected_size = len(self._tree.information_set_actions)
+        if values.shape != (expected_size,):
+            raise ValueError(f"{name} has an incompatible shape")
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} must contain only finite values")
+        if non_negative and np.any(values < 0.0):
+            raise ValueError(f"{name} must not contain negative values")
+
+        restored: list[list[float]] = []
+        for offset, count in zip(
+            self._tree.information_set_action_offsets,
+            self._tree.information_set_action_counts,
+            strict=True,
+        ):
+            start = int(offset)
+            restored.append(values[start : start + int(count)].astype(float).tolist())
+        return restored
 
     def _flatten_policy(
         self,

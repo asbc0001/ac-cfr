@@ -26,5 +26,9 @@ class NaiveCFRPlus(NaiveCFR):
                     0.0, cumulative_regret + value
                 )
 
+    def _validate_restored_regrets(self, regrets: list[list[float]]) -> None:
+        if any(value < 0.0 for row in regrets for value in row):
+            raise ValueError("CFR+ regret_sum must not contain negative values")
+
     def _averaging_weight(self, iteration: int) -> float:
         return float(max(iteration - self._averaging_delay, 0))
