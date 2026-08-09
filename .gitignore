@@ -1,0 +1,35 @@
+# Local Python environments and configuration
+/.venv/
+/.env
+/.env.*
+
+# Python caches, test output, and build products
+__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.ruff_cache/
+/.coverage
+/htmlcov/
+/build/
+/dist/
+*.egg-info/
+
+# Editor and operating-system files
+/.idea/
+/.vscode/
+.DS_Store
+
+# Training state and downloaded strategy artefacts
+/artifacts/
+/checkpoints/
+/runs/
+*.pt
+*.pth
+*.pkl
+*.npy
+*.npz
+
+# Profiling output
+*.prof
+*.lprof
+

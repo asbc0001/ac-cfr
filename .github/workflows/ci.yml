@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install development environment
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Run fast tests
+        run: pytest
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Smoke-test installed wheel outside the checkout
+        run: |
+          python -m venv "${RUNNER_TEMP}/wheel-smoke"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip install --disable-pip-version-check dist/*.whl
+          cd "${RUNNER_TEMP}"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -c "import ac_cfr"
