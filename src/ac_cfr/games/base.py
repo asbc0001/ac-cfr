@@ -99,7 +99,10 @@ class InformationState:
 class GameConfiguration(Protocol):
     """Minimum configuration contract accepted by a game implementation."""
 
-    game_id: GameId
+    @property
+    def game_id(self) -> GameId:
+        """Return the identifier for the configured game rules."""
+        ...
 
 
 class ExtensiveFormState(ABC):
@@ -236,6 +239,19 @@ def validate_chance_outcomes(outcomes: Iterable[ChanceOutcome]) -> tuple[ChanceO
     if not isclose(probability_sum, 1.0, rel_tol=0.0, abs_tol=1e-12):
         raise ValueError("chance outcome probabilities must sum to 1")
     return outcome_tuple
+
+
+def require_legal_action(action: int, legal_actions: tuple[Action, ...]) -> Action:
+    """Return a legal action enum or reject an invalid transition."""
+    if isinstance(action, bool) or not isinstance(action, int):
+        raise TypeError("action must be an integer")
+    try:
+        parsed_action = Action(action)
+    except ValueError as error:
+        raise ValueError(f"unknown action: {action}") from error
+    if parsed_action not in legal_actions:
+        raise ValueError(f"illegal action: {parsed_action.name}")
+    return parsed_action
 
 
 def _validate_non_negative_integer(name: str, value: int) -> None:
