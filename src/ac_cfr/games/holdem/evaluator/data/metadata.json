@@ -1,0 +1,22 @@
+{
+  "combined_sha256": "bad543b8ac5102233f4de927b07e3940f087bc1444f2b55a9ea3f227f620cc6c",
+  "dtype": "<u2",
+  "schema": "ac_cfr_holdem_evaluator_v1",
+  "strength_class_count": 7462,
+  "tables": {
+    "flush": {
+      "file": "flush.bin",
+      "sha256": "bc4f80f0ac6a4ca69d695ffde679748b398b12b292cf21abbfaceb0442ad2115",
+      "shape": [
+        8192
+      ]
+    },
+    "non_flush": {
+      "file": "non_flush.bin",
+      "sha256": "399682dcd744e98745ef23848509ebe348732c707a49a98f20420e48d13e3bd6",
+      "shape": [
+        49205
+      ]
+    }
+  }
+}

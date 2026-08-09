@@ -55,4 +55,4 @@ jobs:
           python -m venv "${RUNNER_TEMP}/wheel-smoke"
           "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip install --disable-pip-version-check dist/*.whl
           cd "${RUNNER_TEMP}"
-          "${RUNNER_TEMP}/wheel-smoke/bin/python" -c "import ac_cfr"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -c "from ac_cfr.games.holdem.evaluator import evaluate_holdem; assert evaluate_holdem((48, 44), (40, 36, 32, 0, 5)) == 1"

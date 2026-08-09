@@ -15,6 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "build==1.5.0",
+    "phevaluator==0.5.3.1",
     "pyright==1.1.411",
     "pytest==9.1.1",
     "ruff==0.15.22",
@@ -22,6 +23,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ac_cfr.games.holdem.evaluator.data" = ["*.bin", "*.json"]
 
 [tool.pytest.ini_options]
 addopts = [
@@ -39,7 +43,7 @@ markers = [
 ]
 
 [tool.pyright]
-include = ["src", "tests"]
+include = ["src", "tests", "tools"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venv = ".venv"
