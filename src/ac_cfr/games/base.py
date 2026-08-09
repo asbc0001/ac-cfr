@@ -8,6 +8,8 @@ from math import fsum, isclose, isfinite
 from numbers import Real
 from typing import Protocol, Self
 
+from ac_cfr.common.config import GameConfigurationId, StateEncodingId
+
 PLAYER_COUNT = 2
 
 PlayerId = int
@@ -103,6 +105,16 @@ class GameConfiguration(Protocol):
     @property
     def game_id(self) -> GameId:
         """Return the identifier for the configured game rules."""
+        ...
+
+    @property
+    def configuration_id(self) -> GameConfigurationId | None:
+        """Return the exact canonical configuration identifier, when defined."""
+        ...
+
+    @property
+    def state_encoding_id(self) -> StateEncodingId:
+        """Return the player-visible state-encoding compatibility identifier."""
         ...
 
 

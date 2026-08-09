@@ -6,6 +6,7 @@ from fractions import Fraction
 from math import isfinite
 from numbers import Real
 
+from ac_cfr.common.config import GameConfigurationId, StateEncodingId
 from ac_cfr.games.base import (
     Action,
     ChanceOutcome,
@@ -60,6 +61,7 @@ class HoldemConfig:
     button_player: PlayerId = 0
     synthetic_flop_start: bool = False
     game_id: GameId = field(default=GameId.HOLD_EM, init=False)
+    state_encoding_id: StateEncodingId = field(default=StateEncodingId.HOLD_EM, init=False)
     utility_unit: UtilityUnit = field(default=UtilityUnit.CHIP, init=False)
     player_count: int = field(default=2, init=False)
 
@@ -114,6 +116,23 @@ class HoldemConfig:
         """Return the public chip value represented by one internal unit."""
         assert isinstance(self.small_bet, Fraction)
         return self.small_bet / 2
+
+    @property
+    def configuration_id(self) -> GameConfigurationId | None:
+        """Return the identifier only for an exact canonical configuration."""
+        canonical_amounts = (
+            self.small_blind == Fraction(1, 2)
+            and self.big_blind == 1
+            and self.small_bet == 1
+            and self.big_bet == 2
+        )
+        if not canonical_amounts or self.button_player != 0:
+            return None
+        if self.start_street is Street.PREFLOP and self.max_bets_per_round == 4:
+            return GameConfigurationId.HULHE
+        if self.start_street is Street.FLOP and self.max_bets_per_round == 2:
+            return GameConfigurationId.MODIFIED_HULHE
+        return None
 
     @property
     def small_blind_units(self) -> int:

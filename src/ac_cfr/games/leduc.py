@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field, replace
 from enum import IntEnum
 
+from ac_cfr.common.config import GameConfigurationId, StateEncodingId
 from ac_cfr.games.base import (
     Action,
     ChanceOutcome,
@@ -89,6 +90,11 @@ class LeducConfig:
     """Fixed OpenSpiel-compatible canonical Leduc rules."""
 
     game_id: GameId = field(default=GameId.LEDUC, init=False)
+    configuration_id: GameConfigurationId = field(
+        default=GameConfigurationId.LEDUC,
+        init=False,
+    )
+    state_encoding_id: StateEncodingId = field(default=StateEncodingId.LEDUC, init=False)
     utility_unit: UtilityUnit = field(default=UtilityUnit.CHIP, init=False)
     player_count: int = field(default=2, init=False)
     ante: int = field(default=1, init=False)

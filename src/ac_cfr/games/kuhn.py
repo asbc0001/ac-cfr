@@ -5,6 +5,7 @@ from enum import IntEnum
 from fractions import Fraction
 from typing import ClassVar
 
+from ac_cfr.common.config import GameConfigurationId, StateEncodingId
 from ac_cfr.games.base import (
     Action,
     ChanceOutcome,
@@ -54,6 +55,11 @@ class KuhnConfig:
     """Fixed canonical Kuhn rules."""
 
     game_id: GameId = field(default=GameId.KUHN, init=False)
+    configuration_id: GameConfigurationId = field(
+        default=GameConfigurationId.KUHN,
+        init=False,
+    )
+    state_encoding_id: StateEncodingId = field(default=StateEncodingId.KUHN, init=False)
     utility_unit: UtilityUnit = field(default=UtilityUnit.CHIP, init=False)
     player_count: int = field(default=2, init=False)
     ante: int = field(default=1, init=False)

@@ -19,8 +19,10 @@ __pycache__/
 /.vscode/
 .DS_Store
 
-# Training state and downloaded strategy artefacts
+# Downloaded or locally exported playable strategy artefacts
 /artifacts/
+
+# Run-local checkpoints, reservoirs, snapshots, metrics, logs, and profiles
 /checkpoints/
 /runs/
 *.pt
@@ -29,7 +31,8 @@ __pycache__/
 *.npy
 *.npz
 
+# Compact curated evidence under /results/ is intentionally version-controlled.
+
 # Profiling output
 *.prof
 *.lprof
-
