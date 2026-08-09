@@ -21,6 +21,7 @@ class GameId(StrEnum):
 
     KUHN = "kuhn"
     LEDUC = "leduc"
+    HOLD_EM = "holdem"
 
 
 class UtilityUnit(StrEnum):

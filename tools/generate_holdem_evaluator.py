@@ -6,7 +6,7 @@ from ac_cfr.games.holdem.evaluator.generation import write_lookup_data
 
 
 def main() -> None:
-    """Regenerate the packaged evaluator data in its canonical location."""
+    """Regenerate the packaged evaluator data"""
     repository_root = Path(__file__).resolve().parents[1]
     output_directory = repository_root / "src/ac_cfr/games/holdem/evaluator/data"
     metadata = write_lookup_data(output_directory)
