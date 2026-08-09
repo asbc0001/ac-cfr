@@ -1,4 +1,4 @@
-"""Readable full-tree counterfactual regret minimisation for Kuhn and Leduc poker."""
+"""Reference full-tree counterfactual regret minimisation for Kuhn and Leduc poker."""
 
 from math import fsum, isclose
 

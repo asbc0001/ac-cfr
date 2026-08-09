@@ -1,4 +1,4 @@
-"""Readable full-tree CFR+ for Kuhn and Leduc poker."""
+"""Reference full-tree CFR+ for Kuhn and Leduc poker."""
 
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.solvers.naive_cfr import NaiveCFR, _validate_non_negative_integer
