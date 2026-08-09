@@ -31,7 +31,7 @@ __pycache__/
 *.npy
 *.npz
 
-# Compact curated evidence under /results/ is intentionally version-controlled.
+# Compact curated evidence under /results/ is version-controlled.
 
 # Profiling output
 *.prof
