@@ -143,6 +143,7 @@ def plot_cfr_gate_results(
             "median_absolute_deviation_seconds",
             "traversals_per_second",
             "median_absolute_deviation_traversals_per_second",
+            "memory_metric",
             "median_peak_memory_mb",
             "median_absolute_deviation_memory_mb",
         },
@@ -331,6 +332,91 @@ def plot_mccfr_validation(
     _save_figure(figure, output_path)
 
 
+def plot_mccfr_performance(summary_path: Path, output_path: Path) -> None:
+    """Plot fixed-workload MCCFR runtime, throughput, and peak memory."""
+    records = _read_records(
+        summary_path,
+        {
+            "implementation",
+            "iterations",
+            "traversals",
+            "median_seconds",
+            "median_absolute_deviation_seconds",
+            "traversals_per_second",
+            "median_absolute_deviation_traversals_per_second",
+            "memory_metric",
+            "median_peak_memory_mb",
+            "median_absolute_deviation_memory_mb",
+        },
+    )
+    by_implementation = {record["implementation"]: record for record in records}
+    if set(by_implementation) != {"reference", "optimised"}:
+        raise ValueError("MCCFR performance results require reference and optimised records")
+
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(12, 4.4))
+    runtime_axis, throughput_axis, memory_axis = figure.subplots(1, 3)
+    implementations = ("reference", "optimised")
+    labels = ("Reference", "Optimised")
+    colours = ("tab:orange", "tab:blue")
+    iterations = {int(record["iterations"]) for record in records}
+    traversals = {int(record["traversals"]) for record in records}
+    if len(iterations) != 1 or len(traversals) != 1:
+        raise ValueError("MCCFR performance results use inconsistent workloads")
+    iteration_count = iterations.pop()
+    traversal_count = traversals.pop()
+    speedup = float(by_implementation["reference"]["median_seconds"]) / float(
+        by_implementation["optimised"]["median_seconds"]
+    )
+    memory_metric = by_implementation["reference"]["memory_metric"]
+    if by_implementation["optimised"]["memory_metric"] != memory_metric:
+        raise ValueError("MCCFR performance results use inconsistent memory metrics")
+    values_and_errors = (
+        (
+            runtime_axis,
+            "median_seconds",
+            "median_absolute_deviation_seconds",
+            "Training time (seconds)",
+        ),
+        (
+            throughput_axis,
+            "traversals_per_second",
+            "median_absolute_deviation_traversals_per_second",
+            "Sampled traversals / second",
+        ),
+        (
+            memory_axis,
+            "median_peak_memory_mb",
+            "median_absolute_deviation_memory_mb",
+            f"Peak process-tree {memory_metric.upper()} (MB)",
+        ),
+    )
+    for axis, value_field, error_field, ylabel in values_and_errors:
+        values = [float(by_implementation[name][value_field]) for name in implementations]
+        errors = [float(by_implementation[name][error_field]) for name in implementations]
+        bars = axis.bar(labels, values, yerr=errors, color=colours, capsize=4)
+        if value_field == "traversals_per_second":
+            value_labels = [f"{value:,.0f}" for value in values]
+        elif value_field == "median_seconds":
+            value_labels = [f"{value:.2f}" for value in values]
+        else:
+            value_labels = [f"{value:.1f}" for value in values]
+        if value_field == "median_seconds":
+            value_labels[1] = f"{value_labels[1]}\n{speedup:.1f}× faster"
+        axis.bar_label(bars, labels=value_labels, padding=3)
+        axis.set_ylabel(ylabel)
+        axis.grid(axis="y", alpha=0.25)
+    runtime_axis.set_yscale("log")
+    throughput_axis.set_yscale("log")
+    figure.suptitle(
+        "Reference versus optimised MCCFR performance on Leduc\n"
+        f"{iteration_count:,} iterations; {traversal_count:,} sampled traversals"
+    )
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.88))
+    _save_figure(figure, output_path)
+
+
 def _plot_gate_convergence(
     records: list[dict[str, str]],
     game: str,
@@ -376,7 +462,17 @@ def _plot_gate_convergence(
             label=label,
         )
 
+    validation_ceiling = 1e-3 if game == "kuhn" else 5e-3
+    for axis in (iteration_axis, time_axis):
+        axis.axhline(
+            validation_ceiling,
+            color="tab:green",
+            linestyle=":",
+            label="Validation ceiling" if axis is iteration_axis else None,
+        )
+
     iteration_axis.set_xlabel("Iterations")
+    iteration_axis.set_xscale("log")
     time_axis.set_xlabel("Solver training time (seconds)")
     time_axis.set_xscale("log")
     for axis in (iteration_axis, time_axis):
@@ -384,7 +480,7 @@ def _plot_gate_convergence(
         axis.set_yscale("log")
         axis.grid(alpha=0.25)
     handles, labels = iteration_axis.get_legend_handles_labels()
-    figure.legend(handles, labels, loc="lower center", ncols=4)
+    figure.legend(handles, labels, loc="lower center", ncols=5)
     figure.suptitle(f"{game.capitalize()} exact exploitability")
     figure.tight_layout(rect=(0.0, 0.12, 1.0, 0.94))
     output_path = output_directory / f"{game}_convergence.png"
@@ -411,6 +507,11 @@ def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> 
 
     positions = np.arange(len(ordered_keys), dtype=np.float64)
     width = 0.36
+    colours = {"reference": "tab:orange", "optimised": "tab:blue"}
+    memory_metrics = {record["memory_metric"] for record in records}
+    if len(memory_metrics) != 1:
+        raise ValueError("benchmark summary uses inconsistent memory metrics")
+    memory_metric = memory_metrics.pop().upper()
     figure = Figure(figsize=(14, 4.8))
     runtime_axis, throughput_axis, memory_axis = figure.subplots(1, 3)
     for offset, implementation, label in (
@@ -424,15 +525,21 @@ def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> 
             width,
             yerr=[float(record["median_absolute_deviation_seconds"]) for record in selected],
             label=label,
+            color=colours[implementation],
             capsize=3,
         )
+        runtime_labels = [f"{float(record['median_seconds']):.3g}" for record in selected]
         if implementation == "optimised":
             speedup_labels = [
                 f"{float(by_key[(*key, 'reference')]['median_seconds']) / float(record['median_seconds']):.1f}×"
                 for key, record in zip(ordered_keys, selected, strict=True)
             ]
-            runtime_axis.bar_label(runtime_bars, labels=speedup_labels, padding=3, fontsize=8)
-        throughput_axis.bar(
+            runtime_labels = [
+                f"{value}\n{speedup} faster"
+                for value, speedup in zip(runtime_labels, speedup_labels, strict=True)
+            ]
+        runtime_axis.bar_label(runtime_bars, labels=runtime_labels, padding=3, fontsize=8)
+        throughput_bars = throughput_axis.bar(
             positions + offset,
             [float(record["traversals_per_second"]) for record in selected],
             width,
@@ -441,15 +548,29 @@ def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> 
                 for record in selected
             ],
             label=label,
+            color=colours[implementation],
             capsize=3,
         )
-        memory_axis.bar(
+        throughput_axis.bar_label(
+            throughput_bars,
+            labels=[f"{float(record['traversals_per_second']):,.0f}" for record in selected],
+            padding=3,
+            fontsize=8,
+        )
+        memory_bars = memory_axis.bar(
             positions + offset,
             [float(record["median_peak_memory_mb"]) for record in selected],
             width,
             yerr=[float(record["median_absolute_deviation_memory_mb"]) for record in selected],
             label=label,
+            color=colours[implementation],
             capsize=3,
+        )
+        memory_axis.bar_label(
+            memory_bars,
+            labels=[f"{float(record['median_peak_memory_mb']):.1f}" for record in selected],
+            padding=3,
+            fontsize=8,
         )
 
     labels = [
@@ -463,12 +584,13 @@ def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> 
     throughput_axis.set_yscale("log")
     runtime_axis.set_ylabel("Median training time (seconds)")
     throughput_axis.set_ylabel("Median traversals / second")
-    memory_axis.set_ylabel("Median peak process-tree memory (MB)")
+    memory_axis.set_ylabel(f"Median peak process-tree {memory_metric} (MB)")
     handles, legend_labels = runtime_axis.get_legend_handles_labels()
     figure.legend(handles, legend_labels, loc="lower center", ncols=2)
     figure.suptitle(
         "Reference versus optimised fixed-workload performance\n"
-        "Kuhn: 10,000 iterations; Leduc: 5,000 iterations"
+        "Kuhn: 10,000 iterations / 20,000 traversals; "
+        "Leduc: 5,000 iterations / 10,000 traversals"
     )
     figure.tight_layout(rect=(0.0, 0.11, 1.0, 0.9))
     _save_figure(figure, output_path)

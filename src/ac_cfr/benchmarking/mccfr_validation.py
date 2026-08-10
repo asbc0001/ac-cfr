@@ -192,7 +192,7 @@ def run_mccfr_validation(
     output_directory.mkdir(parents=True, exist_ok=True)
     convergence_path = output_directory / "convergence.csv"
     summary_path = output_directory / "summary.csv"
-    plot_path = output_directory / "convergence.png"
+    plot_path = output_directory / "plots" / "convergence.png"
     _write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
     _write_csv(summary_path, _SUMMARY_FIELDS, summary)
     plot_mccfr_validation(
@@ -253,7 +253,7 @@ def run_mccfr_validation(
             "files": {
                 "convergence": convergence_path.name,
                 "summary": summary_path.name,
-                "plot": plot_path.name,
+                "plot": str(plot_path.relative_to(output_directory)),
             },
             "file_descriptions": {
                 "convergence": "Exact measurements for every implementation, seed, and milestone.",

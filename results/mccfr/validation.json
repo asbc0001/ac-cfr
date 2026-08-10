@@ -87,7 +87,7 @@
   },
   "files": {
     "convergence": "convergence.csv",
-    "plot": "convergence.png",
+    "plot": "plots/convergence.png",
     "summary": "summary.csv"
   },
   "passed": true,

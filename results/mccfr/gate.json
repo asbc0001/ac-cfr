@@ -1,0 +1,172 @@
+{
+  "about": "Machine-readable configuration, environment, checks, and file index for the Leduc MCCFR completion gate. Strategy-quality evidence remains in validation.json.",
+  "benchmark_id": "mccfr",
+  "checks": [
+    {
+      "absolute_tolerance": 1e-12,
+      "maximum_average_policy_difference": 2.7755575615628914e-17,
+      "maximum_current_policy_difference": 1.1102230246251565e-16,
+      "maximum_regret_difference": 1.7763568394002505e-15,
+      "maximum_strategy_sum_difference": 1.1102230246251565e-16,
+      "name": "identical_draw_updates_match",
+      "passed": true,
+      "source": "validation.json"
+    },
+    {
+      "iteration": 500000,
+      "name": "shared_workload_median_is_within_reference_seed_range",
+      "optimised_median_exploitability": 0.030801946517174335,
+      "passed": true,
+      "reference_seed_range": [
+        0.026759202650502092,
+        0.03651103400541847
+      ],
+      "source": "validation.json"
+    },
+    {
+      "exploitability_limit": 0.005,
+      "iteration": 20000000,
+      "median_exploitability": 0.004500984526344891,
+      "name": "final_median_reaches_cfr_cfr_plus_validation_ceiling",
+      "passed": true,
+      "source": "validation.json"
+    },
+    {
+      "confidence_level": 0.99,
+      "name": "exported_snapshot_self_play_is_neutral",
+      "passed": true,
+      "source": "validation.json"
+    },
+    {
+      "implementations": [
+        "reference",
+        "optimised"
+      ],
+      "name": "fixed_workload_benchmark_completed",
+      "passed": true
+    },
+    {
+      "iterations": 100000,
+      "name": "representative_profiles_completed",
+      "passed": true
+    }
+  ],
+  "configuration": {
+    "fixed_performance_benchmark": {
+      "early_stopping": false,
+      "game": "leduc",
+      "implementations": [
+        "naive_mccfr",
+        "mccfr"
+      ],
+      "iterations": 500000,
+      "memory_sampling_interval_seconds": 0.01,
+      "numba_warm_up_before_timing": true,
+      "repeats": 5,
+      "seed": 0,
+      "timed_region": "solver.train only",
+      "traversals": 1000000,
+      "traversals_per_iteration": 2
+    },
+    "profiles": {
+      "iterations": 100000,
+      "separate_from_formal_timing": true,
+      "traversals": 200000
+    },
+    "strategy_quality_validation": {
+      "early_stopping": false,
+      "equivalence_absolute_tolerance": 1e-12,
+      "equivalence_iterations": 10,
+      "final_exploitability_limit": 0.005,
+      "game": "leduc",
+      "optimised_milestones": [
+        1000,
+        5000,
+        10000,
+        25000,
+        50000,
+        100000,
+        250000,
+        500000,
+        1000000,
+        2000000,
+        5000000,
+        10000000,
+        20000000
+      ],
+      "seeds": [
+        20260810,
+        20260811,
+        20260812,
+        20260813,
+        20260814
+      ],
+      "self_play_confidence_interval_method": "normal",
+      "self_play_confidence_level": 0.99,
+      "self_play_duplicate_pairs": 20000,
+      "self_play_hands": 40000,
+      "self_play_seed": 20260815,
+      "shared_milestones": [
+        1000,
+        5000,
+        10000,
+        25000,
+        50000,
+        100000,
+        250000,
+        500000
+      ],
+      "timed_region": "solver.train only",
+      "traversals_per_iteration": 2
+    }
+  },
+  "environment": {
+    "available_cpu_count": 8,
+    "code_revision": "ea78714cc8f530430f28bbe7c199c8f807962162-dirty",
+    "executable": "/home/asbch/ac-cfr/.venv/bin/python",
+    "logical_cpu_count": 8,
+    "machine": "x86_64",
+    "matplotlib": "3.11.1",
+    "numba": "0.66.0",
+    "numpy": "2.4.6",
+    "physical_cpu_count": 8,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "psutil": "7.2.2",
+    "python": "3.12.3",
+    "total_memory_bytes": 16514670592,
+    "wsl2": true,
+    "wsl_config_paths": []
+  },
+  "file_descriptions": {
+    "benchmark_runs": "Every individual timing and peak-memory repetition.",
+    "benchmark_summary": "Median performance, variation, memory, and final quality.",
+    "convergence": "Exact strategy-quality measurements by seed and milestone.",
+    "plots": "Convergence and fixed-workload engineering comparisons.",
+    "profiles": "Automatically generated cProfile CPU-time reports in Markdown.",
+    "validation": "Multi-seed correctness, convergence, export, and self-play checks."
+  },
+  "files": {
+    "benchmark_runs": "benchmark_runs.csv",
+    "benchmark_summary": "benchmark_summary.csv",
+    "convergence": "convergence.csv",
+    "plots": [
+      "plots/convergence.png",
+      "plots/implementation_performance.png"
+    ],
+    "profiles": [
+      "profiles/leduc_naive_mccfr.md",
+      "profiles/leduc_mccfr.md"
+    ],
+    "validation": "validation.json"
+  },
+  "metric_definitions": {
+    "expected_value_player_zero": "Player zero's expected chip result under both average strategies.",
+    "exploitability": "Average amount either player can gain by switching to an exact best response.",
+    "median_absolute_deviation": "Median distance from the median, used as a robust measure of run variation.",
+    "nash_conv": "Sum of both players' gains from switching individually to exact best responses.",
+    "peak_memory": "Highest sampled memory total across the benchmark process and its children.",
+    "traversal": "One sampled root traversal for one traversing player."
+  },
+  "passed": true
+}
