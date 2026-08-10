@@ -23,8 +23,10 @@ class CFRPlus(CFR):
         return self._averaging_delay
 
     def _validate_restored_regrets(self, regrets: NDArray[np.float64]) -> None:
+        """Reject restored CFR+ regrets that violate non-negative clipping."""
         if np.any(regrets < 0.0):
             raise ValueError("CFR+ regret_sum must not contain negative values")
 
     def _averaging_weight(self, iteration: int) -> float:
+        """Return the delayed linear average-strategy weight."""
         return float(max(iteration - self._averaging_delay, 0))

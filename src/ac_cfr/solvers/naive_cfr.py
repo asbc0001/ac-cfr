@@ -83,6 +83,7 @@ class NaiveCFR:
         self._current_policy = self._regret_matched_policy()
 
     def _run_player_pass(self, traverser: int, averaging_weight: float) -> None:
+        """Run one frozen-policy traversal and then apply its accumulated deltas."""
         # This immutable tuple is the only policy read during the complete pass.
         frozen_policy = self._current_policy
         regret_delta = self._empty_table()
@@ -117,6 +118,7 @@ class NaiveCFR:
         recorded_average_reach: dict[int, float],
         averaging_weight: float,
     ) -> float:
+        """Recursively evaluate the full tree and collect one player's updates."""
         tree = self._tree
         node_type = NodeType(tree.node_types[node_id])
         if node_type is NodeType.TERMINAL:
@@ -203,6 +205,7 @@ class NaiveCFR:
         recorded_average_reach: dict[int, float],
         averaging_weight: float,
     ) -> None:
+        """Record one reach-weighted strategy per information set and pass."""
         previous_reach = recorded_average_reach.get(information_set_id)
         if previous_reach is not None:
             if not isclose(previous_reach, own_reach, rel_tol=0.0, abs_tol=1e-12):
@@ -216,11 +219,13 @@ class NaiveCFR:
             )
 
     def _apply_regret_delta(self, regret_delta: list[list[float]]) -> None:
+        """Add a complete player pass's counterfactual regret changes."""
         for information_set_id, delta in enumerate(regret_delta):
             for action_position, value in enumerate(delta):
                 self._regret_sum[information_set_id][action_position] += value
 
     def _apply_strategy_delta(self, strategy_delta: list[list[float]]) -> None:
+        """Add a complete player pass's average-strategy contributions."""
         for information_set_id, delta in enumerate(strategy_delta):
             for action_position, value in enumerate(delta):
                 self._strategy_sum[information_set_id][action_position] += value
@@ -232,6 +237,7 @@ class NaiveCFR:
         return
 
     def _regret_matched_policy(self) -> tuple[tuple[float, ...], ...]:
+        """Build every current information-set strategy from positive regrets."""
         return tuple(
             _normalise(tuple(max(regret, 0.0) for regret in regrets))
             for regrets in self._regret_sum
@@ -249,6 +255,7 @@ class NaiveCFR:
         *,
         non_negative: bool,
     ) -> list[list[float]]:
+        """Convert a compatible flat checkpoint array into mutable table rows."""
         if not isinstance(values, np.ndarray):
             raise TypeError(f"{name} must be a NumPy array")
         expected_size = len(self._tree.information_set_actions)
@@ -273,6 +280,7 @@ class NaiveCFR:
         self,
         policy: tuple[tuple[float, ...], ...],
     ) -> NDArray[np.float64]:
+        """Flatten policy rows into stable tree action order."""
         return np.fromiter(
             (probability for strategy in policy for probability in strategy),
             dtype=np.float64,

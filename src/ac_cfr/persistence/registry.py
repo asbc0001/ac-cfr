@@ -121,6 +121,7 @@ class StrategyRegistry:
         )
 
     def _resolve_file_path(self, entry: StrategyRegistryEntry) -> Path:
+        """Resolve and integrity-check a registry-owned artefact path."""
         if entry.local_path is None or entry.file_size is None or entry.sha256 is None:
             raise ValueError("file-backed registry entry is incomplete")
         relative_path = PurePosixPath(entry.local_path)
@@ -168,6 +169,7 @@ def load_strategy_registry(path: Path, *, project_root: Path) -> StrategyRegistr
 
 
 def _parse_entry(raw_entry: object) -> StrategyRegistryEntry:
+    """Parse one exact-schema registry entry and validate its values."""
     expected_fields = set(StrategyRegistryEntry.__dataclass_fields__)
     if not isinstance(raw_entry, dict) or set(raw_entry) != expected_fields:
         raise ValueError("strategy entry fields are incomplete or unexpected")
@@ -180,6 +182,7 @@ def _parse_entry(raw_entry: object) -> StrategyRegistryEntry:
 
 
 def _validate_entry(entry: StrategyRegistryEntry) -> None:
+    """Validate common, baseline-specific, and tabular entry invariants."""
     string_fields = (
         entry.strategy_id,
         entry.label,
@@ -245,6 +248,7 @@ def _validate_entry(entry: StrategyRegistryEntry) -> None:
 
 
 def _uniform_policy(tabular_game: TabularGame) -> NDArray[np.float64]:
+    """Build a flat uniform policy for every information set in a game."""
     tree = tabular_game.tree
     policy = np.empty(len(tree.information_set_actions), dtype=np.float64)
     for offset, count in zip(

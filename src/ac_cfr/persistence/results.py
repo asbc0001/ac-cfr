@@ -134,14 +134,17 @@ class _CsvRecordStore:
 
     @property
     def records(self) -> tuple[ResultRecord, ...]:
+        """Return independent copies of records in their current stored order."""
         return tuple(record.copy() for record in self._records.values())
 
     def upsert(self, values: dict[str, object]) -> None:
+        """Normalise and atomically insert or replace one keyed record."""
         record = self._normalise(values)
         self._records[self._record_key(record)] = record
         self._write()
 
     def replace(self, records: list[dict[str, object]]) -> None:
+        """Validate and atomically replace the complete record collection."""
         replacement: dict[tuple[str, ...], ResultRecord] = {}
         for values in records:
             record = self._normalise(values, allow_legacy=True)
@@ -153,6 +156,7 @@ class _CsvRecordStore:
         self._write()
 
     def _read_existing(self) -> dict[tuple[str, ...], ResultRecord]:
+        """Load a current or compatible legacy CSV without duplicate keys."""
         if not self._path.exists():
             return {}
         with self._path.open(encoding="utf-8", newline="") as results_file:
@@ -176,6 +180,7 @@ class _CsvRecordStore:
         *,
         allow_legacy: bool = False,
     ) -> ResultRecord:
+        """Project supported values onto this store's exact string schema."""
         provided_fields = set(values)
         if not provided_fields <= set(self._fields) and not (
             allow_legacy and provided_fields == set(LEGACY_RESULT_FIELDS)
@@ -190,6 +195,7 @@ class _CsvRecordStore:
         return tuple(record[field] for field in self._key_fields)
 
     def _write(self) -> None:
+        """Atomically write records in deterministic order."""
         with atomic_text_writer(self._path) as results_file:
             writer: csv.DictWriter[str] = csv.DictWriter(
                 results_file,
@@ -202,6 +208,7 @@ class _CsvRecordStore:
 
 
 def _validate_required_fields(record: ResultRecord) -> None:
+    """Validate required identifiers and numeric key fields."""
     required_fields = ("game", "game_version", "solver", "run_id", "iteration", "seed")
     if any(not record[field] for field in required_fields):
         raise ValueError("result record is missing a required field")

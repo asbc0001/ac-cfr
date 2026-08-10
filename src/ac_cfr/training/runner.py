@@ -105,14 +105,18 @@ class TrainingOutcome:
 
 @dataclass(slots=True)
 class _ScheduleState:
+    """Mutable early-stopping state persisted with each checkpoint."""
+
     best_exploitability: float | None = None
     evaluations_without_improvement: int = 0
 
     def to_dict(self) -> dict[str, object]:
+        """Return a JSON-compatible copy for checkpoint metadata."""
         return asdict(self)
 
     @classmethod
     def from_dict(cls, values: object) -> "_ScheduleState":
+        """Parse and validate early-stopping state from a checkpoint."""
         if not isinstance(values, dict) or set(values) != set(cls.__dataclass_fields__):
             raise ValueError("checkpoint schedule_state is incompatible")
         try:
@@ -224,6 +228,7 @@ def _execute_schedule(
     code_revision: str,
     progress_callback: Callable[[int, int], None] | None,
 ) -> TrainingOutcome:
+    """Run pending milestones with evaluation, checkpoint, and snapshot events."""
     if solver.iteration > config.iterations:
         raise ValueError("checkpoint iteration exceeds the configured training budget")
     snapshot_paths: list[Path] = []
@@ -345,6 +350,7 @@ def _write_training_summary(
     outcome: TrainingOutcome,
     result_store: TrainingMetricStore,
 ) -> None:
+    """Write a concise human-readable summary of the final recorded metrics."""
     records = tuple(record for record in result_store.records if record["exploitability"])
     if not records:
         return
@@ -381,6 +387,7 @@ def _write_training_summary(
 
 
 def _summary_solver_label(solver: str) -> str:
+    """Return a report label distinguishing algorithm and implementation."""
     return {
         "cfr": "CFR (optimised)",
         "cfr_plus": "CFR+ (optimised)",
@@ -395,6 +402,7 @@ def _remaining_milestones(
     *,
     include_progress: bool = False,
 ) -> tuple[int, ...]:
+    """Merge all pending scheduled and optional progress iterations."""
     milestones = set(
         range(config.evaluation_interval, config.iterations + 1, config.evaluation_interval)
     )
@@ -415,6 +423,7 @@ def _update_early_stopping(
     state: _ScheduleState,
     exploitability: float,
 ) -> bool:
+    """Update plateau tracking and report whether patience is exhausted."""
     minimum_improvement = config.early_stopping_minimum_improvement
     patience = config.early_stopping_patience
     if minimum_improvement is None or patience is None:
@@ -441,6 +450,7 @@ def _save_checkpoint_pair(
     result_store: TrainingMetricStore,
     code_revision: str,
 ) -> None:
+    """Save both an iteration-labelled checkpoint and the latest alias."""
     checkpoint_directory = run_directory / "checkpoints"
     arguments = {
         "solver": solver,
@@ -463,6 +473,7 @@ def _save_checkpoint_pair(
 
 
 def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> NaiveCFR | CFR:
+    """Construct the configured reference or optimised tabular solver."""
     if config.solver == "naive_cfr":
         return NaiveCFR(tabular_game.tree)
     if config.solver == "naive_cfr_plus":
@@ -473,11 +484,13 @@ def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> 
 
 
 def _warm_up_optimised_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> None:
+    """Compile a disposable Numba solver run outside measured training time."""
     if config.solver in ("cfr", "cfr_plus"):
         _create_solver(config, tabular_game).train(1)
 
 
 def _write_run_config(path: Path, config: TabularTrainingConfig, code_revision: str) -> None:
+    """Write immutable run configuration and code provenance as JSON."""
     values = {"code_revision": code_revision, "training_config": config.to_dict()}
     with atomic_text_writer(path) as config_file:
         json.dump(values, config_file, indent=2, sort_keys=True)
@@ -485,6 +498,7 @@ def _write_run_config(path: Path, config: TabularTrainingConfig, code_revision: 
 
 
 def _validate_run_config(path: Path, config: TabularTrainingConfig) -> None:
+    """Ensure resumed training uses its original stored configuration."""
     try:
         values = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -494,6 +508,7 @@ def _validate_run_config(path: Path, config: TabularTrainingConfig) -> None:
 
 
 def _code_revision() -> str:
+    """Return the current Git revision or an explicit unavailable marker."""
     try:
         revision_result = subprocess.run(
             ("git", "rev-parse", "HEAD"),
@@ -518,6 +533,7 @@ def _code_revision() -> str:
 
 
 def _validate_early_stopping(config: TabularTrainingConfig) -> None:
+    """Validate paired early-stopping threshold and patience settings."""
     minimum_improvement = config.early_stopping_minimum_improvement
     patience = config.early_stopping_patience
     if (minimum_improvement is None) != (patience is None):

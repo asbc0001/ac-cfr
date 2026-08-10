@@ -157,6 +157,7 @@ class KuhnState(ExtensiveFormState):
         )
 
     def _player_zero_utility(self) -> float:
+        """Resolve Player 0's fold or showdown payoff from the final history."""
         history = self.action_history
         if history == (Action.BET_RAISE, Action.FOLD):
             return 1.0

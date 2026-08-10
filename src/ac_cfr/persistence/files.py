@@ -61,6 +61,7 @@ def atomic_text_writer(path: Path) -> Iterator[TextIO]:
 
 
 def _sync_directory(directory: Path) -> None:
+    """Flush directory metadata after atomically replacing a file."""
     descriptor = os.open(directory, os.O_RDONLY)
     try:
         os.fsync(descriptor)

@@ -19,6 +19,7 @@ INVALID_RANK = 0
 
 
 def _build_ways() -> tuple[tuple[int, ...], ...]:
+    """Precompute bounded rank-count suffix combinations for perfect hashing."""
     ways = [[0] * 8 for _ in range(RANK_COUNT + 1)]
     ways[0][0] = 1
     for length in range(1, RANK_COUNT + 1):
@@ -50,6 +51,7 @@ def quinary_hash(rank_counts: Sequence[int]) -> int:
 
 
 def _quinary_hash_unchecked(rank_counts: Sequence[int]) -> int:
+    """Rank a validated quinary vector in deterministic lexicographic order."""
     index = 0
     remaining = 7
     for position, count in enumerate(rank_counts):
@@ -65,6 +67,7 @@ def _quinary_hash_unchecked(rank_counts: Sequence[int]) -> int:
 def _evaluate_seven_cards_unchecked(
     cards: tuple[int, int, int, int, int, int, int],
 ) -> int:
+    """Evaluate seven validated cards by one direct table lookup."""
     rank_counts = [0] * RANK_COUNT
     suit_counts = [0] * SUIT_COUNT
     suit_masks = [0] * SUIT_COUNT
@@ -89,6 +92,7 @@ def _evaluate_seven_cards_unchecked(
 
 @cache
 def _load_tables() -> tuple[NDArray[np.uint16], NDArray[np.uint16]]:
+    """Load and integrity-check packaged evaluator tables once per process."""
     data_root = resources.files("ac_cfr.games.holdem.evaluator.data")
     metadata = json.loads(data_root.joinpath("metadata.json").read_text(encoding="utf-8"))
     if (

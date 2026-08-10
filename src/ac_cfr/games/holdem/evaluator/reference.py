@@ -69,17 +69,20 @@ def strength_classes() -> tuple[HandStrength, ...]:
 
 @cache
 def _strength_class_ranks() -> dict[HandStrength, int]:
+    """Map canonical strength tuples to lower-is-stronger numeric ranks."""
     return {strength: rank for rank, strength in enumerate(strength_classes(), start=1)}
 
 
 def _evaluate_seven_cards_unchecked(
     cards: tuple[int, int, int, int, int, int, int],
 ) -> int:
+    """Rank validated cards by checking every five-card subset."""
     strongest = max(_score_five_cards_unchecked(subset) for subset in combinations(cards, 5))
     return _strength_class_ranks()[strongest]
 
 
 def _score_five_cards_unchecked(cards: Sequence[int]) -> HandStrength:
+    """Return a category and kicker tuple for five validated cards."""
     rank_counts = [0] * RANK_COUNT
     suit = cards[0] % SUIT_COUNT
     flush = True
@@ -122,6 +125,7 @@ def _score_five_cards_unchecked(cards: Sequence[int]) -> HandStrength:
 
 
 def _straight_high_rank(rank_mask: int) -> int:
+    """Return the highest straight rank in a mask, including ace-low wheels."""
     wheel_mask = (1 << int(Rank.ACE)) | 0b1111
     best_high = int(Rank.FIVE) if rank_mask & wheel_mask == wheel_mask else -1
     for high_rank in range(int(Rank.ACE), int(Rank.SIX) - 1, -1):
@@ -132,6 +136,7 @@ def _straight_high_rank(rank_mask: int) -> int:
 
 
 def _rank_count_vectors(total: int) -> Iterator[tuple[int, ...]]:
+    """Yield every bounded rank-count vector with the requested card total."""
     counts = [0] * RANK_COUNT
 
     def visit(position: int, remaining: int) -> Iterator[tuple[int, ...]]:
@@ -147,6 +152,7 @@ def _rank_count_vectors(total: int) -> Iterator[tuple[int, ...]]:
 
 
 def _representative_cards(rank_counts: Sequence[int]) -> tuple[int, ...]:
+    """Construct distinct physical cards matching one rank-count vector."""
     suit_counts = [0] * SUIT_COUNT
     cards: list[int] = []
     for rank, count in enumerate(rank_counts):

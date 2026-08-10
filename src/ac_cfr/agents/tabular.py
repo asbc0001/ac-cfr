@@ -54,6 +54,7 @@ class TabularAgent(PlayableAgent):
         )
 
     def _build_information_set_index(self) -> dict[tuple[int, tuple[int, ...]], int]:
+        """Map each player-visible encoding to its stable information-set ID."""
         tree = self._tabular_game.tree
         index: dict[tuple[int, tuple[int, ...]], int] = {}
         for information_set_id, (player, offset, count) in enumerate(

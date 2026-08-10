@@ -70,6 +70,8 @@ class IndexedGameTree:
 
 @dataclass(slots=True)
 class _InformationSetRecord:
+    """Mutable information-set data collected while compiling the tree."""
+
     player: int
     encoding: tuple[int, ...]
     legal_actions: tuple[Action, ...]
@@ -77,6 +79,8 @@ class _InformationSetRecord:
 
 
 class _TreeCompiler:
+    """Compile game states into stable dense node and information-set arrays."""
+
     def __init__(self, game_id: GameId) -> None:
         self.game_id = game_id
         self.node_types: list[NodeType] = []
@@ -91,10 +95,12 @@ class _TreeCompiler:
         self.information_sets: list[_InformationSetRecord] = []
 
     def compile(self, root: ExtensiveFormState) -> IndexedGameTree:
+        """Visit every state from the root and pack the collected structure."""
         self._visit(root, depth=0)
         return self._build_tree()
 
     def _visit(self, state: ExtensiveFormState, depth: int) -> int:
+        """Append one state recursively and return its assigned node ID."""
         node_id = len(self.node_types)
         node_type = state.node_type
         self.node_types.append(node_type)
@@ -142,6 +148,7 @@ class _TreeCompiler:
         return node_id
 
     def _build_tree(self) -> IndexedGameTree:
+        """Pack collected Python records into immutable typed arrays."""
         child_offsets: list[int] = []
         child_counts: list[int] = []
         children: list[int] = []
@@ -217,6 +224,7 @@ def compile_game_tree(
 
 
 def _group_nodes_by_depth(depths: list[int]) -> tuple[list[int], list[int]]:
+    """Flatten node IDs by depth and return offsets into that ordering."""
     grouped_nodes = [[] for _ in range(max(depths) + 1)]
     for node_id, depth in enumerate(depths):
         grouped_nodes[depth].append(node_id)
@@ -233,6 +241,7 @@ def _group_nodes_by_depth(depths: list[int]) -> tuple[list[int], list[int]]:
 def _flatten_information_set_actions(
     records: list[_InformationSetRecord],
 ) -> tuple[list[int], list[int], list[Action]]:
+    """Pack legal-action rows and return each row's offset and length."""
     offsets: list[int] = []
     counts: list[int] = []
     actions: list[Action] = []
@@ -246,6 +255,7 @@ def _flatten_information_set_actions(
 def _flatten_information_set_members(
     records: list[_InformationSetRecord],
 ) -> tuple[list[int], list[int], list[int]]:
+    """Pack member-node rows and return each row's offset and length."""
     offsets: list[int] = []
     counts: list[int] = []
     members: list[int] = []
@@ -259,6 +269,7 @@ def _flatten_information_set_members(
 def _flatten_information_set_encodings(
     records: list[_InformationSetRecord],
 ) -> tuple[list[int], list[int], list[int]]:
+    """Pack information-state encodings and return row offsets and lengths."""
     offsets: list[int] = []
     counts: list[int] = []
     encodings: list[int] = []
@@ -273,5 +284,6 @@ def _read_only[ScalarType: np.generic](
     values: Sequence[object],
     dtype: type[ScalarType],
 ) -> NDArray[ScalarType]:
+    """Copy values into a compact immutable array backed by bytes."""
     packed_values = np.asarray(values, dtype=dtype).tobytes()
     return np.frombuffer(packed_values, dtype=dtype)

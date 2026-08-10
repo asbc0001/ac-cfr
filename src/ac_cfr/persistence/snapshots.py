@@ -119,6 +119,7 @@ def file_sha256(path: Path) -> str:
 
 
 def _parse_metadata(raw_metadata: object) -> TabularSnapshotMetadata:
+    """Parse and type-check exact-schema snapshot metadata."""
     if not isinstance(raw_metadata, dict):
         raise ValueError("strategy snapshot metadata must be an object")
     expected_fields = set(TabularSnapshotMetadata.__dataclass_fields__)
@@ -157,6 +158,7 @@ def _validate_compatibility(
     metadata: TabularSnapshotMetadata,
     tabular_game: TabularGame,
 ) -> None:
+    """Reject metadata that cannot safely describe the supplied game tree."""
     expected = {
         "artifact_schema_version": SNAPSHOT_SCHEMA_VERSION,
         "game": tabular_game.game_id.value,
@@ -180,6 +182,7 @@ def _validated_policy(
     average_policy: NDArray[np.float64],
     tabular_game: TabularGame,
 ) -> NDArray[np.float64]:
+    """Return a finite normalised policy copy compatible with the game tree."""
     if not isinstance(average_policy, np.ndarray):
         raise TypeError("average_policy must be a NumPy array")
     expected_size = len(tabular_game.tree.information_set_actions)

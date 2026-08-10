@@ -214,6 +214,7 @@ class LeducState(ExtensiveFormState):
         )
 
     def _apply_chance(self, outcome: int) -> "LeducState":
+        """Apply a valid private deal or remaining physical public card."""
         if self.private_cards is None:
             deal_id = _require_private_deal(outcome)
             return LeducState(
@@ -239,6 +240,7 @@ class LeducState(ExtensiveFormState):
         )
 
     def _apply_player_action(self, action: Action) -> "LeducState":
+        """Apply one legal action and handle betting-round progression."""
         assert self.acting_player is not None
         player = self.acting_player
         opponent = 1 - player
@@ -291,6 +293,7 @@ class LeducState(ExtensiveFormState):
         )
 
     def _replace(self, **changes: object) -> "LeducState":
+        """Return a new immutable state with selected fields changed."""
         return replace(self, **changes)
 
 
@@ -321,6 +324,7 @@ def compare_leduc_hands(private_cards: tuple[int, int], public_card: int) -> int
 
 
 def _compare_hands(private_cards: tuple[int, int], public_card: int) -> int:
+    """Compare already validated Leduc cards without further allocation."""
     public_rank = public_card // LEDUC_SUIT_COUNT
     first_rank = private_cards[0] // LEDUC_SUIT_COUNT
     second_rank = private_cards[1] // LEDUC_SUIT_COUNT

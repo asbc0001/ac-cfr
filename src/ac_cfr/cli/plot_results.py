@@ -66,6 +66,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _default_output_path(inputs: list[Path], *, filename: str) -> Path:
+    """Place a plot beside one run or in the nearest shared plots directory."""
     if len(inputs) == 1:
         input_path = inputs[0]
         parent = input_path if input_path.is_dir() else input_path.parent
@@ -76,6 +77,7 @@ def _default_output_path(inputs: list[Path], *, filename: str) -> Path:
 
 
 def _comparison_filename(result_paths: tuple[Path, ...], *, plot_name: str) -> str:
+    """Build a non-overwriting comparison filename from source run IDs."""
     run_ids: list[str] = []
     for result_path in result_paths:
         with result_path.open(encoding="utf-8", newline="") as results_file:

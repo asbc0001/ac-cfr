@@ -283,12 +283,14 @@ class HoldemState(ExtensiveFormState):
 
     @property
     def _needs_card(self) -> bool:
+        """Return whether the next transition must deal a private or board card."""
         if len(self.hole_cards[0]) + len(self.hole_cards[1]) < 4:
             return True
         required_board_cards = (0, 3, 4, 5)[int(self.street)]
         return len(self.board_cards) < required_board_cards
 
     def _apply_chance(self, card: int) -> "HoldemState":
+        """Deal one unused physical card and activate play when dealing finishes."""
         validate_card(card)
         if self.dealt_card_mask & (1 << card):
             raise ValueError(f"card has already been dealt: {card}")
@@ -322,6 +324,7 @@ class HoldemState(ExtensiveFormState):
         return replace(state, acting_player=state._starting_player_for_street)
 
     def _apply_player_action(self, action: Action) -> "HoldemState":
+        """Apply one legal betting action, including round and street closure."""
         assert self.acting_player is not None
         player = self.acting_player
         opponent = 1 - player
@@ -384,6 +387,7 @@ class HoldemState(ExtensiveFormState):
         )
 
     def _passive_action_closes_round(self, amount_to_call: int) -> bool:
+        """Return whether a check or call completes the current betting round."""
         if amount_to_call > 0:
             return not self.live_big_blind
         if self.live_big_blind:
@@ -393,12 +397,14 @@ class HoldemState(ExtensiveFormState):
 
     @property
     def _starting_player_for_street(self) -> PlayerId:
+        """Return the first player under heads-up positional rules."""
         if self.street is Street.PREFLOP:
             return self.configuration.button_player
         return 1 - self.configuration.button_player
 
     @property
     def _bet_size(self) -> int:
+        """Return the fixed-limit wager size for the current street."""
         if self.street in (Street.PREFLOP, Street.FLOP):
             return self.configuration.small_bet_units
         return self.configuration.big_bet_units
@@ -451,6 +457,7 @@ def _replace_player_cards(
     player: PlayerId,
     cards: tuple[int, ...],
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return hole-card tuples with one player's cards replaced."""
     if player == 0:
         return cards, hole_cards[1]
     return hole_cards[0], cards
@@ -468,6 +475,7 @@ def _values_by_player(
     second_player: PlayerId,
     second_value: int,
 ) -> tuple[int, int]:
+    """Place two values into canonical Player-0/Player-1 order."""
     values = [0, 0]
     values[first_player] = first_value
     values[second_player] = second_value
@@ -475,6 +483,7 @@ def _values_by_player(
 
 
 def _normalise_chip_amount(name: str, value: ChipAmount) -> Fraction:
+    """Convert a finite numeric chip amount to an exact fraction."""
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"{name} must be a real number")
     if not isfinite(float(value)):

@@ -102,6 +102,7 @@ class CFR:
         self._update_current_policy()
 
     def _run_player_pass(self, traverser: int, averaging_weight: float) -> None:
+        """Run one dense frozen-policy update for the selected player."""
         tree = self._tree
         _run_player_pass_kernel(
             tree.node_types,
@@ -130,6 +131,7 @@ class CFR:
         )
 
     def _update_current_policy(self) -> None:
+        """Rebuild every information-set strategy through regret matching."""
         _normalise_information_sets(
             self._regret_sum,
             self._current_policy,
@@ -151,6 +153,7 @@ class CFR:
         *,
         non_negative: bool,
     ) -> NDArray[np.float64]:
+        """Return a finite compatible training-state array."""
         if not isinstance(values, np.ndarray):
             raise TypeError(f"{name} must be a NumPy array")
         if values.shape != self._regret_sum.shape:
@@ -165,6 +168,7 @@ class CFR:
         self,
         values: NDArray[np.float64],
     ) -> tuple[tuple[float, ...], ...]:
+        """Copy one flat action array into read-only information-set rows."""
         tree = self._tree
         rows: list[tuple[float, ...]] = []
         for offset, count in zip(
@@ -204,6 +208,7 @@ def _run_player_pass_kernel(
     averaging_weight: float,
     clip_regrets: bool,
 ) -> None:
+    """Execute one allocation-free forward/backward full-tree player pass."""
     reach_zero[0] = 1.0
     reach_one[0] = 1.0
     reach_chance[0] = 1.0
@@ -303,6 +308,7 @@ def _normalise_information_sets(
     action_counts: NDArray[np.uint8],
     positive_only: bool = False,
 ) -> None:
+    """Normalise flat rows independently, using uniform zero-mass fallback."""
     for information_set_id in range(len(action_offsets)):
         action_start = action_offsets[information_set_id]
         action_count = action_counts[information_set_id]

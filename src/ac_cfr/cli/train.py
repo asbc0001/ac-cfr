@@ -94,6 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
+    """Build the tabular training command-line parser."""
     parser = argparse.ArgumentParser(description="Train CFR or CFR+ on Kuhn or Leduc.")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--game", choices=("kuhn", "leduc"))
@@ -120,6 +121,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _parse_iterations(value: str | None) -> tuple[int, ...]:
+    """Parse unique snapshot iterations from a comma-separated option."""
     if value is None or not value.strip():
         return ()
     try:
@@ -129,10 +131,12 @@ def _parse_iterations(value: str | None) -> tuple[int, ...]:
 
 
 def _interval_for_target_count(iterations: int, *, target_count: int) -> int:
+    """Choose an interval producing at most roughly the requested event count."""
     return max(1, (iterations + target_count - 1) // target_count)
 
 
 def _progress_reporter() -> Callable[[int, int], None]:
+    """Create a callback that prints progress at five-percentage-point steps."""
     reported_percentage: int | None = None
 
     def report(completed: int, total: int) -> None:
@@ -149,6 +153,7 @@ def _progress_reporter() -> Callable[[int, int], None]:
 
 
 def _print_final_metrics(metrics_path: Path) -> None:
+    """Print the final exact metrics recorded for a completed run."""
     records = tuple(
         record for record in TrainingMetricStore(metrics_path).records if record["exploitability"]
     )

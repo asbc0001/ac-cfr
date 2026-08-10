@@ -135,6 +135,7 @@ def _run_isolated_workload(
     memory_metric: str,
     memory_sampling_interval_seconds: float,
 ) -> tuple[float, float, tuple[float, float, float]]:
+    """Run one workload in a fresh process while sampling its peak memory."""
     context = get_context("spawn")
     parent_connection, child_connection = context.Pipe()
     process = context.Process(
@@ -193,6 +194,7 @@ def _benchmark_worker(
     iterations: int,
     averaging_delay: int,
 ) -> None:
+    """Train and evaluate one solver under parent-process timing control."""
     try:
         tabular_game = create_tabular_game(GameId(game))
         if solver_id in _OPTIMISED_SOLVERS:
@@ -225,6 +227,7 @@ def _benchmark_worker(
 
 
 def _expect_message(connection: Connection, expected_kind: str) -> None:
+    """Receive one worker message and validate its type."""
     message = connection.recv()
     if message[0] == "error":
         raise RuntimeError(f"benchmark worker failed: {message[1]}")
@@ -233,6 +236,7 @@ def _expect_message(connection: Connection, expected_kind: str) -> None:
 
 
 def _preferred_memory_metric() -> str:
+    """Choose the most informative memory measure available on this platform."""
     memory = psutil.Process().memory_full_info()
     if hasattr(memory, "pss"):
         return "pss"
@@ -242,6 +246,7 @@ def _preferred_memory_metric() -> str:
 
 
 def _process_tree_memory_bytes(process: psutil.Process, metric: str) -> int:
+    """Sum a memory measure across a process and its current descendants."""
     total = 0
     for member in (process, *process.children(recursive=True)):
         try:
@@ -257,6 +262,7 @@ def _create_solver(
     solver_id: str,
     averaging_delay: int,
 ) -> NaiveCFR | CFR:
+    """Construct the requested tabular solver for an isolated workload."""
     if solver_id == "naive_cfr":
         return NaiveCFR(tree)
     if solver_id == "naive_cfr_plus":

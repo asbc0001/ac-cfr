@@ -18,6 +18,7 @@ class NaiveCFRPlus(NaiveCFR):
         return self._averaging_delay
 
     def _apply_regret_delta(self, regret_delta: list[list[float]]) -> None:
+        """Apply one aggregated player-pass delta and clip cumulative regrets."""
         # Clip only after every member history has contributed to the pass delta.
         for information_set_id, delta in enumerate(regret_delta):
             for action_position, value in enumerate(delta):
@@ -27,8 +28,10 @@ class NaiveCFRPlus(NaiveCFR):
                 )
 
     def _validate_restored_regrets(self, regrets: list[list[float]]) -> None:
+        """Reject restored CFR+ regrets that violate non-negative clipping."""
         if any(value < 0.0 for row in regrets for value in row):
             raise ValueError("CFR+ regret_sum must not contain negative values")
 
     def _averaging_weight(self, iteration: int) -> float:
+        """Return the delayed linear average-strategy weight."""
         return float(max(iteration - self._averaging_delay, 0))

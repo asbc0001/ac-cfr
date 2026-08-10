@@ -91,6 +91,7 @@ def write_lookup_data(output_directory: Path) -> dict[str, object]:
 def _non_flush_representative(
     rank_counts: Sequence[int],
 ) -> tuple[int, int, int, int, int, int, int]:
+    """Construct a deterministic seven-card hand without a five-card flush."""
     suit_counts = [0] * SUIT_COUNT
     cards: list[int] = []
     for rank, count in enumerate(rank_counts):
@@ -104,6 +105,7 @@ def _non_flush_representative(
 
 
 def _flush_representative(rank_mask: int) -> tuple[int, int, int, int, int, int, int]:
+    """Construct a deterministic seven-card hand for one flush rank mask."""
     cards = [rank * SUIT_COUNT for rank in range(RANK_COUNT) if rank_mask & (1 << rank)]
     if len(cards) == 7:
         return _seven_card_tuple(cards)
@@ -118,6 +120,7 @@ def _flush_representative(rank_mask: int) -> tuple[int, int, int, int, int, int,
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
+    """Replace one generated table file through a same-directory temporary file."""
     temporary_path = path.with_suffix(f"{path.suffix}.tmp")
     temporary_path.write_bytes(payload)
     temporary_path.replace(path)

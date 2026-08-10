@@ -160,6 +160,7 @@ def _plot_gate_convergence(
     game: str,
     output_directory: Path,
 ) -> Path:
+    """Plot one game's reference and optimised convergence by work and time."""
     from matplotlib.figure import Figure
 
     figure = Figure(figsize=(12, 4.8))
@@ -216,6 +217,7 @@ def _plot_gate_convergence(
 
 
 def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> None:
+    """Plot fixed-workload runtime, throughput, and memory comparisons."""
     import numpy as np
     from matplotlib.figure import Figure
 
@@ -297,6 +299,7 @@ def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> 
 
 
 def _gate_series_labels() -> dict[tuple[str, str], str]:
+    """Return display labels for gate algorithm and implementation pairs."""
     return {
         ("cfr", "reference"): "Reference CFR",
         ("cfr", "optimised"): "Optimised CFR",
@@ -306,6 +309,7 @@ def _gate_series_labels() -> dict[tuple[str, str], str]:
 
 
 def _training_records(result_path: Path) -> list[dict[str, str]]:
+    """Load and validate ordered metric records belonging to one training run."""
     required_fields = {
         "game",
         "solver",
@@ -333,6 +337,7 @@ def _exact_metric_series(
     *,
     metric: str,
 ) -> dict[tuple[str, str, str, str], list[dict[str, str]]]:
+    """Group one exact metric by game, solver, run, and seed."""
     if not result_paths:
         raise ValueError("at least one results file is required")
     required_fields = {
@@ -366,6 +371,7 @@ def _plot_series(
     metric: str,
     x_axis: str,
 ) -> None:
+    """Plot grouped metric records on one supplied Matplotlib axis."""
     labels = _series_labels(tuple(series))
     all_values: list[float] = []
     plotted_series = 0
@@ -398,6 +404,7 @@ def _plot_series(
 def _series_labels(
     keys: tuple[tuple[str, str, str, str], ...],
 ) -> dict[tuple[str, str, str, str], str]:
+    """Build labels that identify the source run and seed of each series."""
     labels: dict[tuple[str, str, str, str], str] = {}
     for key in keys:
         game, solver, run_id, seed = key
@@ -406,6 +413,7 @@ def _series_labels(
 
 
 def _read_records(path: Path, required_fields: set[str]) -> list[dict[str, str]]:
+    """Read CSV records after checking all required columns are present."""
     with path.open(encoding="utf-8", newline="") as results_file:
         reader = csv.DictReader(results_file)
         fields = set(reader.fieldnames or ())
@@ -416,6 +424,7 @@ def _read_records(path: Path, required_fields: set[str]) -> list[dict[str, str]]
 
 
 def _interval_throughput(records: list[dict[str, str]]) -> list[float]:
+    """Calculate throughput between successive cumulative training records."""
     throughput: list[float] = []
     previous_traversals = 0
     previous_seconds = 0.0
@@ -433,11 +442,13 @@ def _interval_throughput(records: list[dict[str, str]]) -> list[float]:
 
 
 def _use_log_scale_for_positive_values(axis: Any, values: list[float]) -> None:
+    """Use logarithmic scaling only when every plotted value is positive."""
     if values and all(value > 0.0 for value in values):
         axis.set_yscale("log")
 
 
 def _solver_label(solver: str) -> str:
+    """Return a concise human-readable solver name."""
     return {
         "cfr": "CFR",
         "cfr_plus": "CFR+",
@@ -447,5 +458,6 @@ def _solver_label(solver: str) -> str:
 
 
 def _save_figure(figure: Any, output_path: Path) -> None:
+    """Create the destination directory and save a consistently sized image."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=160)

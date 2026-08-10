@@ -128,6 +128,7 @@ def validate_checkpoint_compatibility(
 
 
 def _flatten_table(table: tuple[tuple[float, ...], ...]) -> NDArray[np.float64]:
+    """Flatten information-set rows into stable action order for storage."""
     return np.fromiter(
         (value for row in table for value in row),
         dtype=np.float64,
@@ -136,6 +137,7 @@ def _flatten_table(table: tuple[tuple[float, ...], ...]) -> NDArray[np.float64]:
 
 
 def _validated_array(value: object, name: str) -> NDArray[np.float64]:
+    """Copy one finite one-dimensional float64 checkpoint array."""
     if not isinstance(value, np.ndarray) or value.ndim != 1:
         raise ValueError(f"checkpoint {name} must be a one-dimensional array")
     if value.dtype != np.dtype(np.float64):
@@ -146,6 +148,7 @@ def _validated_array(value: object, name: str) -> NDArray[np.float64]:
 
 
 def _validate_metadata(metadata: object) -> None:
+    """Validate checkpoint metadata fields, types, and embedded metric records."""
     required_fields = {
         "checkpoint_schema_version",
         "project_version",

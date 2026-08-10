@@ -91,6 +91,7 @@ def evaluate_duplicate_self_play(
 
 
 def _sample_complete_deal(tree: IndexedGameTree, rng: Random) -> tuple[int, int | None]:
+    """Sample a complete physical Kuhn or Leduc deal for duplicate replay."""
     root_edge = int(tree.child_offsets[0]) + rng.randrange(int(tree.child_counts[0]))
     private_deal = int(tree.edge_labels[root_edge])
     if tree.game_id is GameId.KUHN:
@@ -108,6 +109,7 @@ def _play_hand(
     public_card: int | None,
     rng: Random,
 ) -> float:
+    """Play one fixed deal by sampling actions from a complete policy."""
     node_id = 0
     while tree.node_types[node_id] != NodeType.TERMINAL:
         node_type = tree.node_types[node_id]
@@ -135,6 +137,7 @@ def _chance_child(
     edge_count: int,
     outcome: int,
 ) -> int:
+    """Return the child matching a preselected physical chance outcome."""
     for edge_id in range(edge_start, edge_start + edge_count):
         if tree.edge_labels[edge_id] == outcome:
             return int(tree.children[edge_id])
@@ -142,6 +145,7 @@ def _chance_child(
 
 
 def _sample_action_position(probabilities: NDArray[np.float64], rng: Random) -> int:
+    """Sample a stable action position from cumulative probabilities."""
     draw = rng.random()
     cumulative_probability = 0.0
     for action_position, probability in enumerate(probabilities):

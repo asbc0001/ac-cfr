@@ -294,6 +294,7 @@ def _run_correctness_pair(
     dict[tuple[str, str, str], StrategyMetrics],
     dict[tuple[str, str, str], NDArray[np.float64]],
 ]:
+    """Compare one reference/optimised pair and collect milestone evidence."""
     tabular_game = create_tabular_game(GameId(workload.game))
     delay = AVERAGING_DELAY if algorithm == "cfr_plus" else 0
     _create_solver(tabular_game.tree, optimised_solver_id, delay).train(1)
@@ -368,6 +369,7 @@ def _run_correctness_pair(
 def _quality_checks(
     metrics: dict[tuple[str, str, str], StrategyMetrics],
 ) -> list[dict[str, object]]:
+    """Evaluate final strategy quality and implementation-equivalence limits."""
     checks: list[dict[str, object]] = []
     for workload in WORKLOADS:
         for algorithm, _, _ in _ALGORITHMS:
@@ -417,6 +419,7 @@ def _quality_checks(
 def _self_play_checks(
     policies: dict[tuple[str, str, str], NDArray[np.float64]],
 ) -> list[dict[str, object]]:
+    """Check that duplicate-deal self-play results remain statistically neutral."""
     checks: list[dict[str, object]] = []
     for workload in WORKLOADS:
         tree = create_tabular_game(GameId(workload.game)).tree
@@ -449,6 +452,7 @@ def _self_play_checks(
 
 
 def _solver_differences(reference: NaiveCFR, optimised: CFR) -> dict[str, float]:
+    """Return maximum table and policy differences between paired solvers."""
     return {
         "maximum_regret_difference": _maximum_difference(
             _flatten_table(reference.regret_sum),
@@ -474,6 +478,7 @@ def _write_benchmark_results(
     summary_path: Path,
     results: list[tuple[str, str, BenchmarkResult]],
 ) -> None:
+    """Write individual benchmark runs and their robust summary statistics."""
     run_records: list[dict[str, object]] = []
     summary_records: list[dict[str, object]] = []
     for algorithm, implementation, result in results:
@@ -528,6 +533,7 @@ def _write_profile(
     solver_id: str,
     averaging_delay: int,
 ) -> Path:
+    """Run a separate CPU profile and write its annotated Markdown output."""
     tabular_game = create_tabular_game(GameId.LEDUC)
     if solver_id in ("cfr", "cfr_plus"):
         _create_solver(tabular_game.tree, solver_id, averaging_delay).train(1)
@@ -560,6 +566,7 @@ def _write_profile(
 
 
 def _environment_record() -> dict[str, object]:
+    """Capture the software and hardware context needed to interpret results."""
     process = psutil.Process()
     is_wsl2 = "microsoft" in platform.release().lower()
     wsl_config_paths = (
@@ -588,6 +595,7 @@ def _environment_record() -> dict[str, object]:
 
 
 def _code_revision() -> str:
+    """Return the current commit hash with a marker for uncommitted changes."""
     revision = subprocess.run(
         ("git", "rev-parse", "HEAD"),
         check=True,
@@ -608,6 +616,7 @@ def _create_solver(
     solver_id: str,
     averaging_delay: int,
 ) -> NaiveCFR | CFR:
+    """Construct the requested reference or optimised solver."""
     if solver_id == "naive_cfr":
         return NaiveCFR(tree)
     if solver_id == "naive_cfr_plus":
@@ -622,6 +631,7 @@ def _create_reference_solver(
     solver_id: str,
     averaging_delay: int,
 ) -> NaiveCFR:
+    """Construct a reference solver with the requested algorithm."""
     if solver_id == "naive_cfr":
         return NaiveCFR(tree)
     return NaiveCFRPlus(tree, averaging_delay=averaging_delay)
@@ -632,20 +642,24 @@ def _create_optimised_solver(
     solver_id: str,
     averaging_delay: int,
 ) -> CFR:
+    """Construct an optimised solver with the requested algorithm."""
     if solver_id == "cfr":
         return CFR(tree)
     return CFRPlus(tree, averaging_delay=averaging_delay)
 
 
 def _flatten_table(values: tuple[tuple[float, ...], ...]) -> np.ndarray:
+    """Flatten information-set rows into stable action order."""
     return np.fromiter((value for row in values for value in row), dtype=np.float64)
 
 
 def _maximum_difference(first: np.ndarray, second: np.ndarray) -> float:
+    """Return the greatest elementwise absolute difference between two arrays."""
     return float(np.max(np.abs(first - second), initial=0.0))
 
 
 def _median_absolute_deviation(values: tuple[float, ...]) -> float:
+    """Return the median distance from the sample median."""
     centre = median(values)
     return median(abs(value - centre) for value in values)
 
@@ -655,6 +669,7 @@ def _write_csv(
     fields: tuple[str, ...],
     records: list[dict[str, object]],
 ) -> None:
+    """Atomically replace a CSV file using a fixed column order."""
     with atomic_text_writer(path) as results_file:
         writer = csv.DictWriter(results_file, fieldnames=list(fields), lineterminator="\n")
         writer.writeheader()
@@ -662,11 +677,13 @@ def _write_csv(
 
 
 def _write_json(path: Path, values: dict[str, object]) -> None:
+    """Atomically write deterministic, human-readable JSON."""
     with atomic_text_writer(path) as output_file:
         json.dump(values, output_file, indent=2, sort_keys=True)
         output_file.write("\n")
 
 
 def _report_progress(callback: Callable[[str], None] | None, message: str) -> None:
+    """Send a progress message when the caller supplied a callback."""
     if callback is not None:
         callback(message)

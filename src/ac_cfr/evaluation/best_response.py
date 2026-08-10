@@ -72,6 +72,7 @@ class ExactEvaluator:
         )
 
     def _expected_value(self, policy: NDArray[np.float64], player: int) -> float:
+        """Evaluate a fixed policy bottom-up from one player's perspective."""
         tree = self._tree
         values = self._node_values
         utility_sign = 1.0 if player == 0 else -1.0
@@ -106,6 +107,7 @@ class ExactEvaluator:
         policy: NDArray[np.float64],
         player: int,
     ) -> float:
+        """Choose one consistent best action per player information set."""
         tree = self._tree
         reach = self._counterfactual_reach
         reach.fill(0.0)
@@ -170,6 +172,7 @@ class ExactEvaluator:
         values: NDArray[np.float64],
         reach: NDArray[np.float64],
     ) -> None:
+        """Select and apply the action maximising counterfactual information-set value."""
         tree = self._tree
         member_start = int(tree.information_set_member_offsets[information_set_id])
         member_end = member_start + int(tree.information_set_member_counts[information_set_id])
@@ -191,6 +194,7 @@ class ExactEvaluator:
             values[node_id] = values[int(tree.children[edge_id])]
 
     def _validate_policy(self, policy: Policy) -> NDArray[np.float64]:
+        """Return a finite normalised policy array compatible with this tree."""
         try:
             probabilities = np.array(policy, dtype=np.float64, copy=True)
         except (TypeError, ValueError) as error:
@@ -216,6 +220,7 @@ class ExactEvaluator:
         return probabilities
 
     def _validate_information_set_depths(self) -> NDArray[np.uint8]:
+        """Verify each information set occupies one depth and return those depths."""
         tree = self._tree
         depths = np.empty(tree.information_set_count, dtype=np.uint8)
         for information_set_id in range(tree.information_set_count):
@@ -229,6 +234,7 @@ class ExactEvaluator:
         return depths
 
     def _calculate_policy_size(self) -> int:
+        """Return the flattened action count implied by the final information set."""
         tree = self._tree
         if tree.information_set_count == 0:
             return 0

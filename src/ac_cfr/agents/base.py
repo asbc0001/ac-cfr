@@ -95,6 +95,7 @@ def _validate_request(
     information_state: InformationState,
     legal_actions: tuple[Action, ...],
 ) -> None:
+    """Validate that an agent query matches its information state's actions."""
     if not isinstance(information_state, InformationState):
         raise TypeError("information_state must be an InformationState")
     validate_legal_actions(legal_actions)
@@ -107,6 +108,7 @@ def _validate_values(
     expected_count: int,
     name: str,
 ) -> Strategy:
+    """Parse one finite non-negative value for every legal action."""
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
         raise TypeError(f"{name} must be a sequence")
     if len(values) != expected_count:

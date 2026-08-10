@@ -39,6 +39,7 @@ def evaluate_strategy(tree: IndexedGameTree, policy: Policy) -> StrategyMetrics:
 
 
 def _non_negative_improvement(improvement: float) -> float:
+    """Clamp tiny floating-point negatives but reject meaningful contradictions."""
     if improvement >= 0.0:
         return improvement
     if improvement >= -1e-12:
