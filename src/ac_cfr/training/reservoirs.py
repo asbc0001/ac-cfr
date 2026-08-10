@@ -1,8 +1,9 @@
-"""Sample schemas shared by Deep CFR reservoir implementations."""
+"""Sample schemas and reference uniform storage for Deep CFR."""
 
 from dataclasses import dataclass
 from math import fsum, isclose, isfinite
 from numbers import Real
+from random import Random
 
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, LEDUC_NEURAL_STATE_SIZE
 
@@ -11,6 +12,51 @@ DEEP_CFR_RESERVOIR_SCHEMA_VERSION = 1
 NeuralState = tuple[float, ...]
 ActionMask = tuple[bool, ...]
 ActionValues = tuple[float, ...]
+
+
+class UniformReservoir[SampleT]:
+    """Keep a bounded uniform sample of every item admitted so far."""
+
+    def __init__(self, capacity: int, rng: Random) -> None:
+        if isinstance(capacity, bool) or not isinstance(capacity, int):
+            raise TypeError("capacity must be an integer")
+        if capacity < 1:
+            raise ValueError("capacity must be positive")
+        if not isinstance(rng, Random):
+            raise TypeError("rng must be a random.Random instance")
+        self._capacity = capacity
+        self._rng = rng
+        self._samples: list[SampleT] = []
+        self._samples_seen = 0
+
+    @property
+    def capacity(self) -> int:
+        """Return the maximum number of retained samples."""
+        return self._capacity
+
+    @property
+    def samples_seen(self) -> int:
+        """Return the total number of samples offered to the reservoir."""
+        return self._samples_seen
+
+    @property
+    def samples(self) -> tuple[SampleT, ...]:
+        """Return an immutable snapshot of the retained samples."""
+        return tuple(self._samples)
+
+    def __len__(self) -> int:
+        return len(self._samples)
+
+    def add(self, sample: SampleT) -> None:
+        """Admit one sample using standard uniform reservoir replacement."""
+        self._samples_seen += 1
+        if len(self._samples) < self._capacity:
+            self._samples.append(sample)
+            return
+
+        replacement_index = self._rng.randrange(self._samples_seen)
+        if replacement_index < self._capacity:
+            self._samples[replacement_index] = sample
 
 
 @dataclass(frozen=True, slots=True)

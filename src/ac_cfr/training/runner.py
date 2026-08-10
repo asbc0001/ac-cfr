@@ -23,7 +23,12 @@ from ac_cfr.persistence.checkpoints import (
 from ac_cfr.persistence.files import atomic_text_writer
 from ac_cfr.persistence.results import TrainingMetricStore
 from ac_cfr.persistence.snapshots import export_tabular_snapshot
-from ac_cfr.solvers import CFR, MCCFR, CFRPlus, NaiveCFR, NaiveCFRPlus, NaiveMCCFR
+from ac_cfr.solvers.cfr import CFR
+from ac_cfr.solvers.cfr_plus import CFRPlus
+from ac_cfr.solvers.mccfr import MCCFR
+from ac_cfr.solvers.naive_cfr import NaiveCFR
+from ac_cfr.solvers.naive_cfr_plus import NaiveCFRPlus
+from ac_cfr.solvers.naive_mccfr import NaiveMCCFR
 
 SOLVER_IDS = ("naive_cfr", "naive_cfr_plus", "cfr", "cfr_plus", "naive_mccfr", "mccfr")
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
