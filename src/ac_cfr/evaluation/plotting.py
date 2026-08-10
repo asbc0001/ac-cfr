@@ -234,6 +234,103 @@ def plot_mccfr_reference_convergence(
     _save_figure(figure, output_path)
 
 
+def plot_mccfr_validation(
+    convergence_path: Path,
+    summary_path: Path,
+    output_path: Path,
+    *,
+    reference_exploitability_limit: float,
+) -> None:
+    """Plot reference and optimised MCCFR seed distributions and medians."""
+    convergence = _read_records(
+        convergence_path,
+        {"implementation", "seed", "iteration", "elapsed_training_seconds", "exploitability"},
+    )
+    summary = _read_records(
+        summary_path,
+        {
+            "implementation",
+            "iteration",
+            "median_elapsed_training_seconds",
+            "median_exploitability",
+        },
+    )
+
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(12, 4.8))
+    iteration_axis, time_axis = figure.subplots(1, 2)
+    colours = {"reference": "tab:orange", "optimised": "tab:blue"}
+    labels = {"reference": "Reference", "optimised": "Optimised"}
+    for implementation in ("reference", "optimised"):
+        implementation_records = [
+            record for record in convergence if record["implementation"] == implementation
+        ]
+        for seed in sorted({record["seed"] for record in implementation_records}, key=int):
+            seed_records = sorted(
+                (record for record in implementation_records if record["seed"] == seed),
+                key=lambda record: int(record["iteration"]),
+            )
+            values = [float(record["exploitability"]) for record in seed_records]
+            iteration_axis.plot(
+                [int(record["iteration"]) for record in seed_records],
+                values,
+                color=colours[implementation],
+                alpha=0.14,
+                linewidth=0.8,
+            )
+            time_axis.plot(
+                [float(record["elapsed_training_seconds"]) for record in seed_records],
+                values,
+                color=colours[implementation],
+                alpha=0.14,
+                linewidth=0.8,
+            )
+
+        aggregate = sorted(
+            (record for record in summary if record["implementation"] == implementation),
+            key=lambda record: int(record["iteration"]),
+        )
+        median_values = [float(record["median_exploitability"]) for record in aggregate]
+        iteration_axis.plot(
+            [int(record["iteration"]) for record in aggregate],
+            median_values,
+            color=colours[implementation],
+            marker="o",
+            markersize=3,
+            linewidth=2,
+            label=f"{labels[implementation]} median",
+        )
+        time_axis.plot(
+            [float(record["median_elapsed_training_seconds"]) for record in aggregate],
+            median_values,
+            color=colours[implementation],
+            marker="o",
+            markersize=3,
+            linewidth=2,
+            label=f"{labels[implementation]} median",
+        )
+
+    for axis in (iteration_axis, time_axis):
+        axis.axhline(
+            reference_exploitability_limit,
+            color="tab:green",
+            linestyle="--",
+            label="CFR/CFR+ validation ceiling",
+        )
+        axis.set_xscale("log")
+        axis.set_yscale("log")
+        axis.set_ylabel("Exact exploitability (chips)")
+        axis.grid(alpha=0.25)
+    iteration_axis.set_xlabel("MCCFR iterations")
+    time_axis.set_xlabel("Solver training time per seed (seconds)")
+    handles, legend_labels = iteration_axis.get_legend_handles_labels()
+    figure.legend(handles, legend_labels, loc="lower center", ncols=3)
+    figure.suptitle("MCCFR strategy quality on Leduc across five seeds")
+    figure.tight_layout(rect=(0.0, 0.12, 1.0, 0.94))
+    _save_figure(figure, output_path)
+
+
 def _plot_gate_convergence(
     records: list[dict[str, str]],
     game: str,

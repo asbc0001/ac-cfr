@@ -9,16 +9,19 @@ from pathlib import Path
 from ac_cfr.benchmarking.cfr_gate import BENCHMARK_ID, run_cfr_gate
 from ac_cfr.benchmarking.harness import run_tabular_benchmark
 from ac_cfr.benchmarking.mccfr_reference_validation import (
-    VALIDATION_ID,
     run_mccfr_reference_convergence_validation,
 )
+from ac_cfr.benchmarking.mccfr_validation import run_mccfr_validation
 from ac_cfr.training.runner import SOLVER_IDS
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a declared benchmark workload or validation suite."""
     parser = argparse.ArgumentParser(description="Benchmark and validate tabular poker solvers.")
-    parser.add_argument("--suite", choices=("cfr-cfr-plus", "mccfr-reference-convergence"))
+    parser.add_argument(
+        "--suite",
+        choices=("cfr-cfr-plus", "mccfr-reference-convergence", "mccfr-validation"),
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--game", choices=("kuhn", "leduc"))
     parser.add_argument("--solver", choices=SOLVER_IDS)
@@ -42,9 +45,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_directory = arguments.output or Path("results") / BENCHMARK_ID
             result_path = run_cfr_gate(output_directory, progress_callback=print)
             result_label = "gate"
-        else:
-            output_directory = arguments.output or Path("results") / VALIDATION_ID
+        elif arguments.suite == "mccfr-reference-convergence":
+            output_directory = arguments.output or Path("results/mccfr_reference_convergence")
             result_path = run_mccfr_reference_convergence_validation(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "validation"
+        else:
+            output_directory = arguments.output or Path("results/mccfr")
+            result_path = run_mccfr_validation(
                 output_directory,
                 progress_callback=print,
             )

@@ -5,11 +5,13 @@ from ac_cfr.benchmarking.harness import BenchmarkRepeat, BenchmarkResult, run_ta
 from ac_cfr.benchmarking.mccfr_reference_validation import (
     run_mccfr_reference_convergence_validation,
 )
+from ac_cfr.benchmarking.mccfr_validation import run_mccfr_validation
 
 __all__ = (
     "BenchmarkRepeat",
     "BenchmarkResult",
     "run_cfr_gate",
     "run_mccfr_reference_convergence_validation",
+    "run_mccfr_validation",
     "run_tabular_benchmark",
 )
