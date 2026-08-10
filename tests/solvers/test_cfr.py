@@ -71,5 +71,29 @@ def test_dense_solver_reuses_flat_float64_training_buffers() -> None:
     assert tuple(id(buffer) for buffer in buffers) == buffer_ids
 
 
+def test_dense_solver_preserves_updates_beyond_zero_probability_actions() -> None:
+    tree = compile_game_tree(KuhnGame(), KuhnConfig())
+    action_count = len(tree.information_set_actions)
+    regrets = np.tile((1.0, 0.0), action_count // 2)
+    strategy_sum = np.zeros(action_count, dtype=np.float64)
+    reference = NaiveCFR(tree)
+    optimised = CFR(tree)
+    for solver in (reference, optimised):
+        solver.restore_training_state(
+            iteration=0,
+            regret_sum=regrets,
+            strategy_sum=strategy_sum,
+        )
+        assert 0.0 in solver.current_policy()
+        solver.train(1)
+
+    np.testing.assert_allclose(
+        _flatten(optimised.regret_sum),
+        _flatten(reference.regret_sum),
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
 def _flatten(table: tuple[tuple[float, ...], ...]) -> np.ndarray:
     return np.fromiter((value for row in table for value in row), dtype=np.float64)

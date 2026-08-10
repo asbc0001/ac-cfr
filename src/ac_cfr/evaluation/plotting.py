@@ -116,6 +116,195 @@ def plot_exact_metric(
     _save_figure(figure, output_path)
 
 
+def plot_cfr_gate_results(
+    convergence_path: Path,
+    benchmark_summary_path: Path,
+    output_directory: Path,
+) -> tuple[Path, ...]:
+    """Plot CFR/CFR+ convergence and implementation-performance evidence."""
+    convergence = _read_records(
+        convergence_path,
+        {
+            "game",
+            "algorithm",
+            "implementation",
+            "iteration",
+            "elapsed_training_seconds",
+            "exploitability",
+        },
+    )
+    benchmarks = _read_records(
+        benchmark_summary_path,
+        {
+            "game",
+            "algorithm",
+            "implementation",
+            "median_seconds",
+            "median_absolute_deviation_seconds",
+            "traversals_per_second",
+            "median_absolute_deviation_traversals_per_second",
+            "median_peak_memory_mb",
+            "median_absolute_deviation_memory_mb",
+        },
+    )
+    plot_paths = tuple(
+        _plot_gate_convergence(convergence, game, output_directory) for game in ("kuhn", "leduc")
+    )
+    performance_path = output_directory / "implementation_performance.png"
+    _plot_gate_performance(benchmarks, performance_path)
+    return (*plot_paths, performance_path)
+
+
+def _plot_gate_convergence(
+    records: list[dict[str, str]],
+    game: str,
+    output_directory: Path,
+) -> Path:
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(12, 4.8))
+    iteration_axis, time_axis = figure.subplots(1, 2)
+    game_records = [record for record in records if record["game"] == game]
+    algorithm_colours = {"cfr": "tab:blue", "cfr_plus": "tab:orange"}
+    for (algorithm, implementation), label in _gate_series_labels().items():
+        series = sorted(
+            (
+                record
+                for record in game_records
+                if record["algorithm"] == algorithm and record["implementation"] == implementation
+            ),
+            key=lambda record: int(record["iteration"]),
+        )
+        if not series:
+            raise ValueError(f"convergence results are missing {game} {label}")
+        exploitability = [float(record["exploitability"]) for record in series]
+        line_style = "--" if implementation == "reference" else "-"
+        marker = "s" if implementation == "reference" else "o"
+        iteration_axis.plot(
+            [int(record["iteration"]) for record in series],
+            exploitability,
+            linestyle=line_style,
+            marker=marker,
+            color=algorithm_colours[algorithm],
+            markerfacecolor="none" if implementation == "reference" else None,
+            label=label,
+        )
+        time_axis.plot(
+            [float(record["elapsed_training_seconds"]) for record in series],
+            exploitability,
+            linestyle=line_style,
+            marker=marker,
+            color=algorithm_colours[algorithm],
+            markerfacecolor="none" if implementation == "reference" else None,
+            label=label,
+        )
+
+    iteration_axis.set_xlabel("Iterations")
+    time_axis.set_xlabel("Solver training time (seconds)")
+    time_axis.set_xscale("log")
+    for axis in (iteration_axis, time_axis):
+        axis.set_ylabel("Exact exploitability (chips)")
+        axis.set_yscale("log")
+        axis.grid(alpha=0.25)
+    handles, labels = iteration_axis.get_legend_handles_labels()
+    figure.legend(handles, labels, loc="lower center", ncols=4)
+    figure.suptitle(f"{game.capitalize()} exact exploitability")
+    figure.tight_layout(rect=(0.0, 0.12, 1.0, 0.94))
+    output_path = output_directory / f"{game}_convergence.png"
+    _save_figure(figure, output_path)
+    return output_path
+
+
+def _plot_gate_performance(records: list[dict[str, str]], output_path: Path) -> None:
+    import numpy as np
+    from matplotlib.figure import Figure
+
+    ordered_keys = tuple(
+        (game, algorithm) for game in ("kuhn", "leduc") for algorithm in ("cfr", "cfr_plus")
+    )
+    by_key = {
+        (record["game"], record["algorithm"], record["implementation"]): record
+        for record in records
+    }
+    if len(by_key) != len(ordered_keys) * 2:
+        raise ValueError(
+            "benchmark summary must contain one reference and optimised row per workload"
+        )
+
+    positions = np.arange(len(ordered_keys), dtype=np.float64)
+    width = 0.36
+    figure = Figure(figsize=(14, 4.8))
+    runtime_axis, throughput_axis, memory_axis = figure.subplots(1, 3)
+    for offset, implementation, label in (
+        (-width / 2, "reference", "Reference"),
+        (width / 2, "optimised", "Optimised"),
+    ):
+        selected = [by_key[(*key, implementation)] for key in ordered_keys]
+        runtime_bars = runtime_axis.bar(
+            positions + offset,
+            [float(record["median_seconds"]) for record in selected],
+            width,
+            yerr=[float(record["median_absolute_deviation_seconds"]) for record in selected],
+            label=label,
+            capsize=3,
+        )
+        if implementation == "optimised":
+            speedup_labels = [
+                f"{float(by_key[(*key, 'reference')]['median_seconds']) / float(record['median_seconds']):.1f}×"
+                for key, record in zip(ordered_keys, selected, strict=True)
+            ]
+            runtime_axis.bar_label(runtime_bars, labels=speedup_labels, padding=3, fontsize=8)
+        throughput_axis.bar(
+            positions + offset,
+            [float(record["traversals_per_second"]) for record in selected],
+            width,
+            yerr=[
+                float(record["median_absolute_deviation_traversals_per_second"])
+                for record in selected
+            ],
+            label=label,
+            capsize=3,
+        )
+        memory_axis.bar(
+            positions + offset,
+            [float(record["median_peak_memory_mb"]) for record in selected],
+            width,
+            yerr=[float(record["median_absolute_deviation_memory_mb"]) for record in selected],
+            label=label,
+            capsize=3,
+        )
+
+    labels = [
+        f"{game.capitalize()}\n{'CFR+' if algorithm == 'cfr_plus' else 'CFR'}"
+        for game, algorithm in ordered_keys
+    ]
+    for axis in (runtime_axis, throughput_axis, memory_axis):
+        axis.set_xticks(positions, labels)
+        axis.grid(axis="y", alpha=0.25)
+    runtime_axis.set_yscale("log")
+    throughput_axis.set_yscale("log")
+    runtime_axis.set_ylabel("Median training time (seconds)")
+    throughput_axis.set_ylabel("Median traversals / second")
+    memory_axis.set_ylabel("Median peak process-tree memory (MB)")
+    handles, legend_labels = runtime_axis.get_legend_handles_labels()
+    figure.legend(handles, legend_labels, loc="lower center", ncols=2)
+    figure.suptitle(
+        "Reference versus optimised fixed-workload performance\n"
+        "Kuhn: 10,000 iterations; Leduc: 5,000 iterations"
+    )
+    figure.tight_layout(rect=(0.0, 0.11, 1.0, 0.9))
+    _save_figure(figure, output_path)
+
+
+def _gate_series_labels() -> dict[tuple[str, str], str]:
+    return {
+        ("cfr", "reference"): "Reference CFR",
+        ("cfr", "optimised"): "Optimised CFR",
+        ("cfr_plus", "reference"): "Reference CFR+",
+        ("cfr_plus", "optimised"): "Optimised CFR+",
+    }
+
+
 def _training_records(result_path: Path) -> list[dict[str, str]]:
     required_fields = {
         "game",

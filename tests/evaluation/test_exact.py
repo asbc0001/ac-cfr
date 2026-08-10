@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from ac_cfr.evaluation import ExactEvaluator, evaluate_strategy
+from ac_cfr.evaluation import ExactEvaluator, evaluate_duplicate_self_play, evaluate_strategy
 from ac_cfr.games.kuhn import KuhnConfig, KuhnGame
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
@@ -91,6 +91,19 @@ def test_policy_validation_rejects_invalid_distributions() -> None:
     policy[0] = 0.25
     with pytest.raises(ValueError, match="sum to 1"):
         evaluator.expected_value(policy)
+
+
+def test_duplicate_self_play_is_neutral_with_swapped_seats() -> None:
+    tree = compile_game_tree(KuhnGame(), KuhnConfig())
+    result = evaluate_duplicate_self_play(
+        tree,
+        _uniform_policy(tree),
+        duplicate_pairs=2_000,
+        seed=7,
+    )
+
+    assert result.includes_zero
+    assert result.duplicate_pairs == 2_000
 
 
 def _uniform_policy(tree: IndexedGameTree) -> NDArray[np.float64]:

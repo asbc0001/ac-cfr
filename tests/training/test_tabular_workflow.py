@@ -171,6 +171,9 @@ def test_evaluation_results_plot_and_benchmark_foundations(tmp_path: Path) -> No
     )
     assert benchmark.traversals == 4
     assert benchmark.median_seconds > 0.0
+    assert benchmark.memory_metric in {"pss", "uss", "rss"}
+    assert benchmark.median_peak_memory_mb > 0.0
+    assert len(benchmark.repeat_results) == 2
 
 
 def test_training_command_uses_useful_output_defaults(
