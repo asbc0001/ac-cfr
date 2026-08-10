@@ -58,6 +58,39 @@ class UniformReservoir[SampleT]:
         if replacement_index < self._capacity:
             self._samples[replacement_index] = sample
 
+    def training_state(self) -> dict[str, object]:
+        """Return occupancy and random state needed for exact continuation."""
+        return {
+            "samples_seen": self._samples_seen,
+            "rng_state": self._rng.getstate(),
+        }
+
+    def restore_training_state(
+        self,
+        *,
+        samples: tuple[SampleT, ...],
+        samples_seen: int,
+        rng_state: object,
+    ) -> None:
+        """Restore validated contents and sampling state without partial mutation."""
+        if not isinstance(samples, tuple):
+            raise TypeError("samples must be a tuple")
+        if isinstance(samples_seen, bool) or not isinstance(samples_seen, int):
+            raise TypeError("samples_seen must be an integer")
+        if samples_seen < 0 or len(samples) != min(samples_seen, self._capacity):
+            raise ValueError("reservoir occupancy is inconsistent")
+        if not isinstance(rng_state, tuple):
+            raise ValueError("reservoir RNG state is invalid")
+        restored_rng = Random()
+        try:
+            restored_rng.setstate(rng_state)
+        except (TypeError, ValueError) as error:
+            raise ValueError("reservoir RNG state is invalid") from error
+
+        self._samples = list(samples)
+        self._samples_seen = samples_seen
+        self._rng = restored_rng
+
 
 @dataclass(frozen=True, slots=True)
 class AdvantageSample:

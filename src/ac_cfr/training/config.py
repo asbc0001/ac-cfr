@@ -76,7 +76,45 @@ class DeepCFRTrainingConfig:
         """Return stable configuration values suitable for checkpoint metadata."""
         values = asdict(self)
         values["snapshot_iterations"] = list(self.snapshot_iterations)
+        values["model_config_id"] = self.model_config_id.value
+        values["state_encoding_id"] = self.state_encoding_id.value
+        values["optimizer_id"] = self.optimizer_id.value
         return values
+
+    @classmethod
+    def from_dict(cls, values: object) -> "DeepCFRTrainingConfig":
+        """Reconstruct an exactly validated checkpointed configuration."""
+        if not isinstance(values, dict) or set(values) != {
+            "iterations",
+            "traversals_per_player",
+            "advantage_reservoir_capacity",
+            "strategy_reservoir_capacity",
+            "advantage_training_epochs",
+            "strategy_training_epochs",
+            "batch_size",
+            "learning_rate",
+            "validation_fraction",
+            "max_gradient_norm",
+            "dropout_probability",
+            "seed",
+            "snapshot_iterations",
+            "model_config_id",
+            "state_encoding_id",
+            "optimizer_id",
+        }:
+            raise ValueError("Deep CFR training configuration fields are incompatible")
+        parsed = values.copy()
+        snapshots = parsed["snapshot_iterations"]
+        if not isinstance(snapshots, list):
+            raise ValueError("snapshot_iterations must be stored as a list")
+        try:
+            parsed["snapshot_iterations"] = tuple(snapshots)
+            parsed["model_config_id"] = ModelConfigId(parsed["model_config_id"])
+            parsed["state_encoding_id"] = StateEncodingId(parsed["state_encoding_id"])
+            parsed["optimizer_id"] = OptimizerId(parsed["optimizer_id"])
+            return cls(**parsed)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Deep CFR training configuration is invalid") from error
 
 
 def _validate_positive_integer(name: str, value: int) -> None:

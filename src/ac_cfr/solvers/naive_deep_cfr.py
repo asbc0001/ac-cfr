@@ -29,6 +29,60 @@ class NetworkTrainingMetrics:
     training_loss: float
     validation_loss: float | None
 
+    def __post_init__(self) -> None:
+        if isinstance(self.iteration, bool) or not isinstance(self.iteration, int):
+            raise TypeError("metric iteration must be an integer")
+        if self.iteration < 1:
+            raise ValueError("metric iteration must be positive")
+        if self.network_role not in ("advantage", "strategy"):
+            raise ValueError("network_role must be advantage or strategy")
+        if self.network_role == "advantage" and self.player not in (0, 1):
+            raise ValueError("advantage metrics must identify a player")
+        if self.network_role == "strategy" and self.player is not None:
+            raise ValueError("strategy metrics must not identify one player")
+        for name, count in (
+            ("training_samples", self.training_samples),
+            ("validation_samples", self.validation_samples),
+        ):
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise TypeError(f"{name} must be an integer")
+            if count < (1 if name == "training_samples" else 0):
+                raise ValueError(f"{name} is invalid")
+        if not isfinite(self.training_loss):
+            raise ValueError("training_loss must be finite")
+        if self.validation_loss is not None and not isfinite(self.validation_loss):
+            raise ValueError("validation_loss must be finite when present")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return checkpoint-safe metric values."""
+        return {
+            "iteration": self.iteration,
+            "network_role": self.network_role,
+            "player": self.player,
+            "training_samples": self.training_samples,
+            "validation_samples": self.validation_samples,
+            "training_loss": self.training_loss,
+            "validation_loss": self.validation_loss,
+        }
+
+    @classmethod
+    def from_dict(cls, values: object) -> "NetworkTrainingMetrics":
+        """Parse one strictly shaped checkpoint metric record."""
+        if not isinstance(values, dict) or set(values) != {
+            "iteration",
+            "network_role",
+            "player",
+            "training_samples",
+            "validation_samples",
+            "training_loss",
+            "validation_loss",
+        }:
+            raise ValueError("network training metric fields are incompatible")
+        try:
+            return cls(**values)
+        except (TypeError, ValueError) as error:
+            raise ValueError("network training metric is invalid") from error
+
 
 @dataclass(frozen=True, slots=True)
 class _LossMetrics:
@@ -84,6 +138,16 @@ class NaiveDeepCFR:
         return self._iteration
 
     @property
+    def config(self) -> DeepCFRTrainingConfig:
+        """Return the immutable training configuration."""
+        return self._config
+
+    @property
+    def tree(self) -> IndexedGameTree:
+        """Return the indexed Leduc tree interpreted by this solver."""
+        return self._tree
+
+    @property
     def advantage_reservoirs(
         self,
     ) -> tuple[UniformReservoir[AdvantageSample], UniformReservoir[AdvantageSample]]:
@@ -114,6 +178,55 @@ class NaiveDeepCFR:
     def training_metrics(self) -> tuple[NetworkTrainingMetrics, ...]:
         """Return completed advantage and strategy network training measurements."""
         return tuple(self._training_metrics)
+
+    def training_rng_state(self) -> dict[str, object]:
+        """Return every mutable random stream used by traversal and reservoirs."""
+        return {
+            "chance": self._chance_rng.getstate(),
+            "policy": self._policy_rng.getstate(),
+            "advantage_reservoir_0": self._advantage_reservoirs[0].training_state()["rng_state"],
+            "advantage_reservoir_1": self._advantage_reservoirs[1].training_state()["rng_state"],
+            "strategy_reservoir": self._strategy_reservoir.training_state()["rng_state"],
+        }
+
+    def restore_training_state(
+        self,
+        *,
+        iteration: int,
+        advantage_networks: tuple[DeepCFRNetwork | None, DeepCFRNetwork | None],
+        snapshot_networks: dict[int, DeepCFRNetwork],
+        final_strategy_network: DeepCFRNetwork | None,
+        training_metrics: tuple[NetworkTrainingMetrics, ...],
+        chance_rng_state: object,
+        policy_rng_state: object,
+    ) -> None:
+        """Restore validated iteration, model, metric, and traversal RNG state."""
+        _validate_non_negative_integer("iteration", iteration)
+        if iteration > self._config.iterations:
+            raise ValueError("checkpoint iteration exceeds the configured budget")
+        if any(network is None for network in advantage_networks) != (iteration == 0):
+            raise ValueError("checkpoint advantage-network state is inconsistent")
+        expected_snapshots = {
+            snapshot_iteration
+            for snapshot_iteration in self._config.snapshot_iterations
+            if snapshot_iteration <= iteration
+        }
+        if set(snapshot_networks) != expected_snapshots:
+            raise ValueError("checkpoint milestone-network state is inconsistent")
+        if (final_strategy_network is not None) != (iteration == self._config.iterations):
+            raise ValueError("checkpoint final-network state is inconsistent")
+        if _metric_schedule(training_metrics) != _expected_metric_schedule(self._config, iteration):
+            raise ValueError("checkpoint training metrics are incomplete or misaligned")
+        chance_rng = _restored_random(chance_rng_state, "chance")
+        policy_rng = _restored_random(policy_rng_state, "policy")
+
+        self._iteration = iteration
+        self._advantage_networks = list(advantage_networks)
+        self._snapshot_networks = snapshot_networks.copy()
+        self._final_strategy_network = final_strategy_network
+        self._training_metrics = list(training_metrics)
+        self._chance_rng = chance_rng
+        self._policy_rng = policy_rng
 
     def train(self, iterations: int) -> None:
         """Run complete alternating outer iterations up to the configured budget."""
@@ -265,6 +378,7 @@ class NaiveDeepCFR:
             batch_size=self._config.batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
+            training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
             strategy_targets=False,
             validation_fraction=self._config.validation_fraction,
             max_gradient_norm=self._config.max_gradient_norm,
@@ -294,6 +408,7 @@ class NaiveDeepCFR:
             batch_size=self._config.batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
+            training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
             strategy_targets=True,
             validation_fraction=self._config.validation_fraction,
             max_gradient_norm=self._config.max_gradient_norm,
@@ -405,6 +520,7 @@ def _train_network(
     batch_size: int,
     learning_rate: float,
     data_seed: int,
+    training_seed: int,
     strategy_targets: bool,
     validation_fraction: float,
     max_gradient_norm: float | None,
@@ -427,33 +543,23 @@ def _train_network(
     training_indices, validation_indices = _split_training_indices(
         len(samples), validation_fraction, generator
     )
-    _require_finite_parameters(network)
-    network.train()
-
-    for _ in range(epochs):
-        order = training_indices[torch.randperm(len(training_indices), generator=generator)]
-        for start in range(0, len(training_indices), batch_size):
-            indices = order[start : start + batch_size]
-            optimiser.zero_grad(set_to_none=True)
-            loss = linear_cfr_loss(
-                network(states[indices]),
-                targets[indices],
-                action_masks[indices],
-                sample_iterations[indices],
-                current_iteration,
-                strategy_targets=strategy_targets,
-            )
-            loss.backward()
-            _require_finite_gradients(network)
-            if max_gradient_norm is not None:
-                torch.nn.utils.clip_grad_norm_(
-                    network.parameters(),
-                    max_gradient_norm,
-                    error_if_nonfinite=True,
-                )
-            optimiser.step()
-            _require_finite_parameters(network)
-    network.eval()
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(training_seed)
+        _fit_network(
+            network=network,
+            optimiser=optimiser,
+            states=states,
+            targets=targets,
+            action_masks=action_masks,
+            sample_iterations=sample_iterations,
+            training_indices=training_indices,
+            current_iteration=current_iteration,
+            epochs=epochs,
+            batch_size=batch_size,
+            generator=generator,
+            strategy_targets=strategy_targets,
+            max_gradient_norm=max_gradient_norm,
+        )
     training_loss = _evaluate_network_loss(
         network,
         states,
@@ -484,6 +590,51 @@ def _train_network(
         training_loss=training_loss,
         validation_loss=validation_loss,
     )
+
+
+def _fit_network(
+    *,
+    network: DeepCFRNetwork,
+    optimiser: torch.optim.Optimizer,
+    states: Tensor,
+    targets: Tensor,
+    action_masks: Tensor,
+    sample_iterations: Tensor,
+    training_indices: Tensor,
+    current_iteration: int,
+    epochs: int,
+    batch_size: int,
+    generator: torch.Generator,
+    strategy_targets: bool,
+    max_gradient_norm: float | None,
+) -> None:
+    """Fit one network while its caller controls the PyTorch random stream."""
+    _require_finite_parameters(network)
+    network.train()
+    for _ in range(epochs):
+        order = training_indices[torch.randperm(len(training_indices), generator=generator)]
+        for start in range(0, len(training_indices), batch_size):
+            indices = order[start : start + batch_size]
+            optimiser.zero_grad(set_to_none=True)
+            loss = linear_cfr_loss(
+                network(states[indices]),
+                targets[indices],
+                action_masks[indices],
+                sample_iterations[indices],
+                current_iteration,
+                strategy_targets=strategy_targets,
+            )
+            loss.backward()
+            _require_finite_gradients(network)
+            if max_gradient_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    network.parameters(),
+                    max_gradient_norm,
+                    error_if_nonfinite=True,
+                )
+            optimiser.step()
+            _require_finite_parameters(network)
+    network.eval()
 
 
 def _split_training_indices(
@@ -569,6 +720,42 @@ def _sample_position(probabilities: tuple[float, ...] | np.ndarray, rng: Random)
 
 def _network_seed_index(player_or_strategy: int, iteration: int) -> int:
     return iteration * 3 + player_or_strategy
+
+
+def _metric_schedule(
+    metrics: tuple[NetworkTrainingMetrics, ...],
+) -> tuple[tuple[int, str, int | None], ...]:
+    return tuple((metric.iteration, metric.network_role, metric.player) for metric in metrics)
+
+
+def _expected_metric_schedule(
+    config: DeepCFRTrainingConfig,
+    iteration: int,
+) -> tuple[tuple[int, str, int | None], ...]:
+    schedule: list[tuple[int, str, int | None]] = []
+    for completed_iteration in range(1, iteration + 1):
+        schedule.extend(
+            (
+                (completed_iteration, "advantage", 0),
+                (completed_iteration, "advantage", 1),
+            )
+        )
+        if completed_iteration in config.snapshot_iterations:
+            schedule.append((completed_iteration, "strategy", None))
+    if iteration == config.iterations:
+        schedule.append((iteration, "strategy", None))
+    return tuple(schedule)
+
+
+def _restored_random(state: object, name: str) -> Random:
+    if not isinstance(state, tuple):
+        raise ValueError(f"checkpoint {name} RNG state is invalid")
+    rng = Random()
+    try:
+        rng.setstate(state)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"checkpoint {name} RNG state is invalid") from error
+    return rng
 
 
 def _validate_non_negative_integer(name: str, value: int) -> None:

@@ -48,6 +48,17 @@ class DeepCFRNetworkConfig:
         if not isfinite(self.dropout_probability) or not 0.0 <= self.dropout_probability < 1.0:
             raise ValueError("dropout_probability must be finite and between zero and one")
 
+    def to_dict(self) -> dict[str, object]:
+        """Return portable architecture metadata for checkpoints and snapshots."""
+        return {
+            "model_config_id": self.model_config_id.value,
+            "input_size": self.input_size,
+            "hidden_sizes": list(self.hidden_sizes),
+            "output_size": self.output_size,
+            "input_scaling": self.input_scaling,
+            "dropout_probability": self.dropout_probability,
+        }
+
 
 LEDUC_DEEP_CFR_NETWORK = DeepCFRNetworkConfig(
     model_config_id=ModelConfigId.LEDUC_DEEP_CFR,
@@ -86,16 +97,16 @@ class DeepCFRNetwork(nn.Module):
         return self.layers(states)
 
 
-def build_deep_cfr_network(
+def deep_cfr_network_config(
     model_config_id: ModelConfigId,
     *,
     dropout_probability: float = 0.0,
-) -> DeepCFRNetwork:
-    """Construct the exact network selected by a stable model identifier."""
+) -> DeepCFRNetworkConfig:
+    """Return the exact architecture selected by stable configuration values."""
     if not isinstance(model_config_id, ModelConfigId):
         raise TypeError("model_config_id must be a ModelConfigId")
     base_config = _NETWORK_CONFIGS[model_config_id]
-    config = DeepCFRNetworkConfig(
+    return DeepCFRNetworkConfig(
         model_config_id=base_config.model_config_id,
         input_size=base_config.input_size,
         hidden_sizes=base_config.hidden_sizes,
@@ -103,4 +114,17 @@ def build_deep_cfr_network(
         input_scaling=base_config.input_scaling,
         dropout_probability=dropout_probability,
     )
-    return DeepCFRNetwork(config)
+
+
+def build_deep_cfr_network(
+    model_config_id: ModelConfigId,
+    *,
+    dropout_probability: float = 0.0,
+) -> DeepCFRNetwork:
+    """Construct the exact network selected by stable configuration values."""
+    return DeepCFRNetwork(
+        deep_cfr_network_config(
+            model_config_id,
+            dropout_probability=dropout_probability,
+        )
+    )

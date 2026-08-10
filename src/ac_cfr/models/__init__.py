@@ -5,6 +5,7 @@ from ac_cfr.models.networks import (
     DeepCFRNetwork,
     DeepCFRNetworkConfig,
     build_deep_cfr_network,
+    deep_cfr_network_config,
 )
 
 __all__ = (
@@ -12,4 +13,5 @@ __all__ = (
     "DeepCFRNetwork",
     "DeepCFRNetworkConfig",
     "build_deep_cfr_network",
+    "deep_cfr_network_config",
 )
