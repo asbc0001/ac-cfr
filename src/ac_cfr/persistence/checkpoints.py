@@ -1,4 +1,4 @@
-"""Atomic, validated checkpoints for tabular CFR training."""
+"""Atomic, validated checkpoints for tabular poker-solver training."""
 
 import json
 from dataclasses import dataclass
@@ -19,10 +19,14 @@ from ac_cfr.persistence.results import (
     ResultRecord,
 )
 from ac_cfr.solvers.cfr import CFR
+from ac_cfr.solvers.mccfr import MCCFR
 from ac_cfr.solvers.naive_cfr import NaiveCFR
+from ac_cfr.solvers.naive_mccfr import NaiveMCCFR
 
-CHECKPOINT_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 2
 PROJECT_VERSION = version("ac-cfr")
+
+TabularSolver = NaiveCFR | CFR | NaiveMCCFR | MCCFR
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +41,7 @@ class LoadedTabularCheckpoint:
 def save_tabular_checkpoint(
     path: Path,
     *,
-    solver: NaiveCFR | CFR,
+    solver: TabularSolver,
     tabular_game: TabularGame,
     solver_id: str,
     run_id: str,
@@ -68,6 +72,7 @@ def save_tabular_checkpoint(
         "elapsed_training_seconds": elapsed_training_seconds,
         "schedule_state": schedule_state,
         "metric_records": list(metric_records),
+        "rng_state": _solver_rng_state(solver),
     }
     metadata_json = json.dumps(metadata, sort_keys=True, separators=(",", ":"))
     regret_sum = _flatten_table(solver.regret_sum)
@@ -96,6 +101,7 @@ def load_tabular_checkpoint(path: Path) -> LoadedTabularCheckpoint:
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError("checkpoint is unreadable") from error
     _validate_metadata(metadata)
+    metadata.setdefault("rng_state", None)
     regret_sum.setflags(write=False)
     strategy_sum.setflags(write=False)
     return LoadedTabularCheckpoint(metadata, regret_sum, strategy_sum)
@@ -108,7 +114,6 @@ def validate_checkpoint_compatibility(
 ) -> None:
     """Reject incompatible checkpoint metadata before restoring a solver."""
     expected = {
-        "checkpoint_schema_version": CHECKPOINT_SCHEMA_VERSION,
         "project_version": PROJECT_VERSION,
         "game": tabular_game.game_id.value,
         "game_version": tabular_game.configuration_id.value,
@@ -120,11 +125,20 @@ def validate_checkpoint_compatibility(
     for field_name, expected_value in expected.items():
         if checkpoint.metadata[field_name] != expected_value:
             raise ValueError(f"checkpoint has incompatible {field_name}")
+    schema_version = checkpoint.metadata["checkpoint_schema_version"]
+    if schema_version not in (1, CHECKPOINT_SCHEMA_VERSION):
+        raise ValueError("checkpoint has incompatible checkpoint_schema_version")
     expected_size = len(tabular_game.tree.information_set_actions)
     if checkpoint.regret_sum.shape != (expected_size,):
         raise ValueError("checkpoint regret_sum has an incompatible shape")
     if checkpoint.strategy_sum.shape != (expected_size,):
         raise ValueError("checkpoint strategy_sum has an incompatible shape")
+    rng_state = checkpoint.metadata["rng_state"]
+    if solver_id in ("naive_mccfr", "mccfr"):
+        if not isinstance(rng_state, dict):
+            raise ValueError("MCCFR checkpoint is missing RNG state")
+    elif rng_state is not None:
+        raise ValueError("deterministic solver checkpoint contains unexpected RNG state")
 
 
 def _flatten_table(table: tuple[tuple[float, ...], ...]) -> NDArray[np.float64]:
@@ -149,7 +163,7 @@ def _validated_array(value: object, name: str) -> NDArray[np.float64]:
 
 def _validate_metadata(metadata: object) -> None:
     """Validate checkpoint metadata fields, types, and embedded metric records."""
-    required_fields = {
+    common_fields = {
         "checkpoint_schema_version",
         "project_version",
         "code_revision",
@@ -168,7 +182,16 @@ def _validate_metadata(metadata: object) -> None:
         "schedule_state",
         "metric_records",
     }
-    if not isinstance(metadata, dict) or set(metadata) != required_fields:
+    if not isinstance(metadata, dict):
+        raise ValueError("checkpoint metadata fields are incomplete or unexpected")
+    schema_version = metadata.get("checkpoint_schema_version")
+    if schema_version == 1:
+        required_fields = common_fields
+    elif schema_version == CHECKPOINT_SCHEMA_VERSION:
+        required_fields = common_fields | {"rng_state"}
+    else:
+        raise ValueError("checkpoint schema version is invalid")
+    if set(metadata) != required_fields:
         raise ValueError("checkpoint metadata fields are incomplete or unexpected")
     string_fields = (
         "project_version",
@@ -184,7 +207,6 @@ def _validate_metadata(metadata: object) -> None:
     )
     if any(not isinstance(metadata[field], str) or not metadata[field] for field in string_fields):
         raise ValueError("checkpoint identifiers must be non-empty strings")
-    schema_version = metadata["checkpoint_schema_version"]
     if isinstance(schema_version, bool) or not isinstance(schema_version, int):
         raise ValueError("checkpoint schema version is invalid")
     if (
@@ -199,6 +221,9 @@ def _validate_metadata(metadata: object) -> None:
         raise ValueError("checkpoint training_config is invalid")
     if not isinstance(metadata["schedule_state"], dict):
         raise ValueError("checkpoint schedule_state is invalid")
+    rng_state = metadata.get("rng_state")
+    if rng_state is not None and not isinstance(rng_state, dict):
+        raise ValueError("checkpoint rng_state is invalid")
     records = metadata["metric_records"]
     if not isinstance(records, list):
         raise ValueError("checkpoint metric_records is invalid")
@@ -218,3 +243,10 @@ def _validate_metadata(metadata: object) -> None:
         if record_key in record_keys:
             raise ValueError("checkpoint contains duplicate metric records")
         record_keys.add(record_key)
+
+
+def _solver_rng_state(solver: TabularSolver) -> dict[str, object] | None:
+    """Return sampled-solver RNG state and no state for deterministic solvers."""
+    if isinstance(solver, (NaiveMCCFR, MCCFR)):
+        return solver.training_rng_state()
+    return None

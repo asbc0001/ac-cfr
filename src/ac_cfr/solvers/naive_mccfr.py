@@ -67,6 +67,38 @@ class NaiveMCCFR:
         average_policy = tuple(_normalise(weights) for weights in self._strategy_sum)
         return self._flatten_policy(average_policy)
 
+    def training_rng_state(self) -> dict[str, object]:
+        """Return JSON-compatible chance and policy RNG state for checkpointing."""
+        return {
+            "format": "python_random_v1",
+            "chance": _encode_random_state(self._chance_rng),
+            "policy": _encode_random_state(self._policy_rng),
+        }
+
+    def restore_training_state(
+        self,
+        *,
+        iteration: int,
+        regret_sum: NDArray[np.float64],
+        strategy_sum: NDArray[np.float64],
+        rng_state: object,
+    ) -> None:
+        """Restore validated tables and random streams from a checkpoint."""
+        _validate_non_negative_integer("iteration", iteration)
+        restored_regrets = self._validated_array(regret_sum, "regret_sum", non_negative=False)
+        restored_strategies = self._validated_array(
+            strategy_sum,
+            "strategy_sum",
+            non_negative=True,
+        )
+        chance_rng, policy_rng = _restore_random_streams(rng_state)
+
+        self._iteration = iteration
+        self._restore_table(self._regret_sum, restored_regrets)
+        self._restore_table(self._strategy_sum, restored_strategies)
+        self._chance_rng = chance_rng
+        self._policy_rng = policy_rng
+
     def _run_player_traversal(self, traverser: int) -> float:
         """Run one sampled traversal with a fresh opponent-action cache."""
         sampled_opponent_actions: dict[int, int] = {}
@@ -144,6 +176,42 @@ class NaiveMCCFR:
             [0.0] * int(action_count) for action_count in self._tree.information_set_action_counts
         ]
 
+    def _validated_array(
+        self,
+        values: NDArray[np.float64],
+        name: str,
+        *,
+        non_negative: bool,
+    ) -> NDArray[np.float64]:
+        """Return a finite flat table compatible with this solver."""
+        if not isinstance(values, np.ndarray):
+            raise TypeError(f"{name} must be a NumPy array")
+        expected_shape = (len(self._tree.information_set_actions),)
+        if values.shape != expected_shape:
+            raise ValueError(f"{name} has an incompatible shape")
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} must contain only finite values")
+        if non_negative and np.any(values < 0.0):
+            raise ValueError(f"{name} must not contain negative values")
+        return np.asarray(values, dtype=np.float64)
+
+    def _restore_table(
+        self,
+        destination: list[list[float]],
+        source: NDArray[np.float64],
+    ) -> None:
+        """Copy one flat checkpoint table into information-set rows."""
+        for information_set_id, (offset, count) in enumerate(
+            zip(
+                self._tree.information_set_action_offsets,
+                self._tree.information_set_action_counts,
+                strict=True,
+            )
+        ):
+            action_start = int(offset)
+            action_end = action_start + int(count)
+            destination[information_set_id][:] = source[action_start:action_end]
+
     def _flatten_policy(
         self,
         policy: tuple[tuple[float, ...], ...],
@@ -171,3 +239,55 @@ def _sample_position(probabilities: tuple[float, ...] | NDArray[np.float64], rng
         if draw < cumulative_probability:
             return position
     return len(probabilities) - 1
+
+
+def _encode_random_state(rng: Random) -> dict[str, object]:
+    """Convert Python's tuple RNG state into an explicit JSON object."""
+    version, internal_state, gaussian_cache = rng.getstate()
+    return {
+        "version": version,
+        "internal_state": list(internal_state),
+        "gaussian_cache": gaussian_cache,
+    }
+
+
+def _restore_random_streams(rng_state: object) -> tuple[Random, Random]:
+    """Validate checkpointed Python RNG states without mutating the solver."""
+    if not isinstance(rng_state, dict) or set(rng_state) != {"format", "chance", "policy"}:
+        raise ValueError("MCCFR RNG state fields are incomplete or unexpected")
+    if rng_state["format"] != "python_random_v1":
+        raise ValueError("MCCFR RNG state format is incompatible")
+    return (
+        _restore_random_state(rng_state["chance"]),
+        _restore_random_state(rng_state["policy"]),
+    )
+
+
+def _restore_random_state(value: object) -> Random:
+    """Construct one Python RNG from a validated JSON-compatible state."""
+    if not isinstance(value, dict) or set(value) != {
+        "version",
+        "internal_state",
+        "gaussian_cache",
+    }:
+        raise ValueError("MCCFR random stream state is invalid")
+    version = value["version"]
+    internal_state = value["internal_state"]
+    gaussian_cache = value["gaussian_cache"]
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise ValueError("MCCFR random stream version is invalid")
+    if not isinstance(internal_state, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in internal_state
+    ):
+        raise ValueError("MCCFR random stream internal state is invalid")
+    if gaussian_cache is not None and (
+        isinstance(gaussian_cache, bool) or not isinstance(gaussian_cache, (int, float))
+    ):
+        raise ValueError("MCCFR random stream Gaussian cache is invalid")
+
+    rng = Random()
+    try:
+        rng.setstate((version, tuple(internal_state), gaussian_cache))
+    except (TypeError, ValueError) as error:
+        raise ValueError("MCCFR random stream state is invalid") from error
+    return rng

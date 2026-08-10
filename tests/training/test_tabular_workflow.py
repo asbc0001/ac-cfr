@@ -10,15 +10,15 @@ from ac_cfr.benchmarking import run_tabular_benchmark
 from ac_cfr.cli.evaluate import main as evaluate_main
 from ac_cfr.cli.plot_results import main as plot_main
 from ac_cfr.cli.train import main as train_main
-from ac_cfr.games.base import GameId
+from ac_cfr.games.base import GameId, NodeType
 from ac_cfr.games.kuhn import KuhnConfig, KuhnGame
+from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tabular import create_tabular_game
 from ac_cfr.persistence.checkpoints import load_tabular_checkpoint
 from ac_cfr.persistence.files import atomic_binary_writer
 from ac_cfr.persistence.registry import load_strategy_registry
 from ac_cfr.persistence.results import EVALUATION_RESULT_FIELDS, TRAINING_METRIC_FIELDS
 from ac_cfr.persistence.snapshots import (
-    SNAPSHOT_SCHEMA_VERSION,
     export_tabular_snapshot,
     file_sha256,
 )
@@ -30,13 +30,22 @@ from ac_cfr.training import (
 )
 
 
-@pytest.mark.parametrize("solver_id", ("naive_cfr", "cfr"))
+@pytest.mark.parametrize(
+    ("solver_id", "game"),
+    (
+        ("naive_cfr", "kuhn"),
+        ("cfr", "kuhn"),
+        ("naive_mccfr", "leduc"),
+        ("mccfr", "leduc"),
+    ),
+)
 def test_checkpoint_resume_matches_uninterrupted_training_and_reconciles_metrics(
     tmp_path: Path,
     solver_id: str,
+    game: str,
 ) -> None:
     config = TabularTrainingConfig(
-        game="kuhn",
+        game=game,
         solver=solver_id,
         iterations=4,
         seed=7,
@@ -48,13 +57,15 @@ def test_checkpoint_resume_matches_uninterrupted_training_and_reconciles_metrics
     first_outcome = start_tabular_training(config, runs_root=tmp_path)
     uninterrupted = load_tabular_checkpoint(first_outcome.latest_checkpoint)
 
-    resumed_outcome = resume_tabular_training(
-        first_outcome.run_directory / "checkpoints" / "iter_2.npz"
-    )
+    resume_path = first_outcome.run_directory / "checkpoints" / "iter_2.npz"
+    if solver_id == "cfr":
+        resume_path = _schema_one_checkpoint_copy(resume_path)
+    resumed_outcome = resume_tabular_training(resume_path)
     resumed = load_tabular_checkpoint(resumed_outcome.latest_checkpoint)
     assert resumed_outcome.final_iteration == 4
     assert np.array_equal(resumed.regret_sum, uninterrupted.regret_sum)
     assert np.array_equal(resumed.strategy_sum, uninterrupted.strategy_sum)
+    assert resumed.metadata["rng_state"] == uninterrupted.metadata["rng_state"]
 
     with (resumed_outcome.run_directory / "metrics.csv").open(
         encoding="utf-8", newline=""
@@ -139,6 +150,53 @@ def test_snapshot_registry_loads_tabular_agent_and_rejects_tampering(tmp_path: P
     snapshot_path.write_bytes(snapshot_bytes[:-1] + bytes((snapshot_bytes[-1] ^ 1,)))
     with pytest.raises(ValueError, match="checksum"):
         load_strategy_registry(registry_path, project_root=tmp_path).resolve("kuhn_test")
+
+
+def test_mccfr_training_command_exports_a_registry_loadable_agent(tmp_path: Path) -> None:
+    run_id = "mccfr_agent_test"
+    assert (
+        train_main(
+            (
+                "--game",
+                "leduc",
+                "--solver",
+                "mccfr",
+                "--iterations",
+                "4",
+                "--run-id",
+                run_id,
+                "--runs-root",
+                str(tmp_path),
+                "--evaluation-interval",
+                "2",
+                "--checkpoint-interval",
+                "2",
+            )
+        )
+        == 0
+    )
+    source_snapshot = tmp_path / run_id / "strategy_snapshots" / f"{run_id}_iter_4.npz"
+    snapshot_path = tmp_path / "artifacts" / "leduc_mccfr_test.npz"
+    snapshot_path.parent.mkdir()
+    snapshot_path.write_bytes(source_snapshot.read_bytes())
+    registry_path = tmp_path / "configs" / "strategy_registry.json"
+    registry_path.parent.mkdir()
+    registry_path.write_text(
+        json.dumps(_registry_for_snapshot(snapshot_path, GameId.LEDUC)),
+        encoding="utf-8",
+    )
+
+    resolved = load_strategy_registry(registry_path, project_root=tmp_path).resolve("leduc_test")
+    assert isinstance(resolved.agent, TabularAgent)
+    state = LeducGame().initial_state(LeducConfig())
+    while state.node_type is NodeType.CHANCE:
+        state = state.apply_action(state.chance_outcomes()[0].outcome)
+    information_state = state.information_state()
+    strategy = resolved.agent.get_strategy(
+        information_state,
+        information_state.legal_actions,
+    )
+    assert sum(strategy) == pytest.approx(1.0)
 
 
 def test_evaluation_results_plot_and_benchmark_foundations(tmp_path: Path) -> None:
@@ -240,25 +298,27 @@ def test_training_command_uses_useful_output_defaults(
 
 
 def _registry_for_snapshot(snapshot_path: Path, game_id: GameId) -> dict[str, object]:
+    metadata = _snapshot_metadata(snapshot_path)
+    strategy_id = f"{game_id.value}_test"
     return {
         "schema_version": 1,
         "strategies": [
             {
-                "strategy_id": "kuhn_test",
-                "label": "Kuhn test strategy",
+                "strategy_id": strategy_id,
+                "label": f"{game_id.value.capitalize()} test strategy",
                 "game": game_id.value,
-                "game_version": "kuhn",
-                "algorithm": "naive_cfr",
+                "game_version": metadata["game_version"],
+                "algorithm": metadata["solver"],
                 "agent_type": "tabular",
-                "snapshot_id": "kuhn_test",
-                "training_iteration": 2,
-                "local_path": "artifacts/kuhn_test.npz",
+                "snapshot_id": metadata["snapshot_id"],
+                "training_iteration": metadata["training_iteration"],
+                "local_path": f"artifacts/{snapshot_path.name}",
                 "evaluation": {},
-                "model_config_id": "tabular_average_strategy",
-                "state_encoding": "kuhn",
-                "action_space": "poker",
-                "tree_digest": _snapshot_tree_digest(snapshot_path),
-                "artifact_schema_version": SNAPSHOT_SCHEMA_VERSION,
+                "model_config_id": metadata["model_config_id"],
+                "state_encoding": metadata["state_encoding"],
+                "action_space": metadata["action_space"],
+                "tree_digest": metadata["tree_digest"],
+                "artifact_schema_version": metadata["artifact_schema_version"],
                 "release_id": "local-test",
                 "file_size": snapshot_path.stat().st_size,
                 "sha256": file_sha256(snapshot_path),
@@ -267,7 +327,25 @@ def _registry_for_snapshot(snapshot_path: Path, game_id: GameId) -> dict[str, ob
     }
 
 
-def _snapshot_tree_digest(snapshot_path: Path) -> str:
+def _snapshot_metadata(snapshot_path: Path) -> dict[str, object]:
     with np.load(snapshot_path, allow_pickle=False) as snapshot:
         metadata = json.loads(str(snapshot["metadata"].item()))
-    return str(metadata["tree_digest"])
+    assert isinstance(metadata, dict)
+    return metadata
+
+
+def _schema_one_checkpoint_copy(checkpoint_path: Path) -> Path:
+    """Create the deterministic checkpoint shape written before RNG persistence."""
+    legacy_path = checkpoint_path.with_name("schema_one_iter_2.npz")
+    with np.load(checkpoint_path, allow_pickle=False) as checkpoint:
+        metadata = json.loads(str(checkpoint["metadata"].item()))
+        metadata["checkpoint_schema_version"] = 1
+        metadata.pop("rng_state")
+        with atomic_binary_writer(legacy_path) as checkpoint_file:
+            np.savez_compressed(
+                checkpoint_file,
+                metadata=np.asarray(json.dumps(metadata, sort_keys=True, separators=(",", ":"))),
+                regret_sum=checkpoint["regret_sum"],
+                strategy_sum=checkpoint["strategy_sum"],
+            )
+    return legacy_path

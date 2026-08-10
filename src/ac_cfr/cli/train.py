@@ -16,7 +16,7 @@ from ac_cfr.training.runner import (
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run or resume one configured CFR training job."""
+    """Run or resume one configured tabular training job."""
     parser = _parser()
     arguments = parser.parse_args(argv)
     report_progress = _progress_reporter()
@@ -95,7 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     """Build the tabular training command-line parser."""
-    parser = argparse.ArgumentParser(description="Train CFR or CFR+ on Kuhn or Leduc.")
+    parser = argparse.ArgumentParser(description="Train a tabular poker solver.")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--game", choices=("kuhn", "leduc"))
     parser.add_argument("--solver", choices=SOLVER_IDS)

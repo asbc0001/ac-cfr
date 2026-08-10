@@ -14,12 +14,14 @@ from ac_cfr.games.tabular import create_tabular_game
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.solvers.cfr import CFR
 from ac_cfr.solvers.cfr_plus import CFRPlus
+from ac_cfr.solvers.mccfr import MCCFR
 from ac_cfr.solvers.naive_cfr import NaiveCFR
 from ac_cfr.solvers.naive_cfr_plus import NaiveCFRPlus
+from ac_cfr.solvers.naive_mccfr import NaiveMCCFR
 from ac_cfr.training.runner import SOLVER_IDS
 
 DEFAULT_MEMORY_SAMPLING_INTERVAL_SECONDS = 0.01
-_OPTIMISED_SOLVERS = ("cfr", "cfr_plus")
+_OPTIMISED_SOLVERS = ("cfr", "cfr_plus", "mccfr")
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +70,8 @@ def run_tabular_benchmark(
         raise ValueError(f"solver must be one of: {', '.join(SOLVER_IDS)}")
     if game not in (GameId.KUHN.value, GameId.LEDUC.value):
         raise ValueError("game must be kuhn or leduc")
+    if solver_id in ("naive_mccfr", "mccfr") and game != GameId.LEDUC.value:
+        raise ValueError("external-sampling MCCFR supports only Leduc")
     _validate_positive_integer("iterations", iterations)
     _validate_positive_integer("repeats", repeats)
     _validate_averaging_delay(solver_id, averaging_delay)
@@ -261,7 +265,7 @@ def _create_solver(
     tree: IndexedGameTree,
     solver_id: str,
     averaging_delay: int,
-) -> NaiveCFR | CFR:
+) -> NaiveCFR | CFR | NaiveMCCFR | MCCFR:
     """Construct the requested tabular solver for an isolated workload."""
     if solver_id == "naive_cfr":
         return NaiveCFR(tree)
@@ -269,7 +273,11 @@ def _create_solver(
         return NaiveCFRPlus(tree, averaging_delay=averaging_delay)
     if solver_id == "cfr":
         return CFR(tree)
-    return CFRPlus(tree, averaging_delay=averaging_delay)
+    if solver_id == "cfr_plus":
+        return CFRPlus(tree, averaging_delay=averaging_delay)
+    if solver_id == "naive_mccfr":
+        return NaiveMCCFR(tree, seed=0)
+    return MCCFR(tree, seed=0)
 
 
 def _validate_averaging_delay(solver_id: str, averaging_delay: int) -> None:
@@ -277,7 +285,7 @@ def _validate_averaging_delay(solver_id: str, averaging_delay: int) -> None:
         raise TypeError("averaging_delay must be an integer")
     if averaging_delay < 0:
         raise ValueError("averaging_delay must not be negative")
-    if solver_id in ("naive_cfr", "cfr") and averaging_delay != 0:
+    if solver_id not in ("naive_cfr_plus", "cfr_plus") and averaging_delay != 0:
         raise ValueError("averaging_delay applies only to CFR+ solvers")
 
 

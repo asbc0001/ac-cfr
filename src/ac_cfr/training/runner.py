@@ -1,4 +1,4 @@
-"""Checkpointed CFR and CFR+ training for Kuhn and Leduc poker."""
+"""Checkpointed tabular poker-solver training."""
 
 import json
 import re
@@ -10,10 +10,12 @@ from pathlib import Path
 from secrets import token_hex
 from time import perf_counter
 
+from ac_cfr.common.rng import SeedDeriver
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId, UtilityUnit
 from ac_cfr.games.tabular import TabularGame, create_tabular_game
 from ac_cfr.persistence.checkpoints import (
+    LoadedTabularCheckpoint,
     load_tabular_checkpoint,
     save_tabular_checkpoint,
     validate_checkpoint_compatibility,
@@ -21,10 +23,12 @@ from ac_cfr.persistence.checkpoints import (
 from ac_cfr.persistence.files import atomic_text_writer
 from ac_cfr.persistence.results import TrainingMetricStore
 from ac_cfr.persistence.snapshots import export_tabular_snapshot
-from ac_cfr.solvers import CFR, CFRPlus, NaiveCFR, NaiveCFRPlus
+from ac_cfr.solvers import CFR, MCCFR, CFRPlus, NaiveCFR, NaiveCFRPlus, NaiveMCCFR
 
-SOLVER_IDS = ("naive_cfr", "naive_cfr_plus", "cfr", "cfr_plus")
+SOLVER_IDS = ("naive_cfr", "naive_cfr_plus", "cfr", "cfr_plus", "naive_mccfr", "mccfr")
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+TabularSolver = NaiveCFR | CFR | NaiveMCCFR | MCCFR
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,13 +56,17 @@ class TabularTrainingConfig:
             raise ValueError("game must be kuhn or leduc")
         if self.solver not in SOLVER_IDS:
             raise ValueError(f"solver must be one of: {', '.join(SOLVER_IDS)}")
+        if self.solver in ("naive_mccfr", "mccfr") and game_id is not GameId.LEDUC:
+            raise ValueError("external-sampling MCCFR supports only Leduc")
         _validate_positive_integer("iterations", self.iterations)
         _validate_integer("seed", self.seed)
+        if self.solver in ("naive_mccfr", "mccfr"):
+            SeedDeriver(self.seed)
         _validate_identifier("run_id", self.run_id)
         _validate_positive_integer("evaluation_interval", self.evaluation_interval)
         _validate_positive_integer("checkpoint_interval", self.checkpoint_interval)
         _validate_non_negative_integer("averaging_delay", self.averaging_delay)
-        if self.solver in ("naive_cfr", "cfr") and self.averaging_delay != 0:
+        if self.solver not in ("naive_cfr_plus", "cfr_plus") and self.averaging_delay != 0:
             raise ValueError("averaging_delay applies only to CFR+ solvers")
         if not isinstance(self.snapshot_iterations, tuple):
             raise TypeError("snapshot_iterations must be a tuple")
@@ -148,7 +156,7 @@ def start_tabular_training(
     runs_root: Path = Path("runs"),
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> TrainingOutcome:
-    """Start a CFR or CFR+ training run."""
+    """Start one configured tabular training run."""
     run_directory = runs_root / config.run_id
     if run_directory.exists():
         raise FileExistsError(f"run directory already exists: {run_directory}")
@@ -176,7 +184,7 @@ def resume_tabular_training(
     *,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> TrainingOutcome:
-    """Resume a CFR or CFR+ run from a checkpoint."""
+    """Resume one tabular run from a checkpoint."""
     checkpoint = load_tabular_checkpoint(checkpoint_path)
     config = TabularTrainingConfig.from_dict(checkpoint.metadata["training_config"])
     tabular_game = create_tabular_game(GameId(config.game))
@@ -197,11 +205,7 @@ def resume_tabular_training(
     schedule_state = _ScheduleState.from_dict(checkpoint.metadata["schedule_state"])
     _warm_up_optimised_solver(config, tabular_game)
     solver = _create_solver(config, tabular_game)
-    solver.restore_training_state(
-        iteration=checkpoint.metadata["iteration"],
-        regret_sum=checkpoint.regret_sum,
-        strategy_sum=checkpoint.strategy_sum,
-    )
+    _restore_solver(solver, checkpoint)
     result_store.replace(checkpoint.metadata["metric_records"])
     return _execute_schedule(
         config=config,
@@ -220,7 +224,7 @@ def _execute_schedule(
     *,
     config: TabularTrainingConfig,
     tabular_game: TabularGame,
-    solver: NaiveCFR | CFR,
+    solver: TabularSolver,
     run_directory: Path,
     result_store: TrainingMetricStore,
     elapsed_training_seconds: float,
@@ -393,6 +397,8 @@ def _summary_solver_label(solver: str) -> str:
         "cfr_plus": "CFR+ (optimised)",
         "naive_cfr": "CFR (reference)",
         "naive_cfr_plus": "CFR+ (reference)",
+        "mccfr": "MCCFR (optimised)",
+        "naive_mccfr": "MCCFR (reference)",
     }[solver]
 
 
@@ -441,7 +447,7 @@ def _update_early_stopping(
 def _save_checkpoint_pair(
     *,
     run_directory: Path,
-    solver: NaiveCFR | CFR,
+    solver: TabularSolver,
     tabular_game: TabularGame,
     config: TabularTrainingConfig,
     elapsed_training_seconds: float,
@@ -472,7 +478,7 @@ def _save_checkpoint_pair(
     save_tabular_checkpoint(checkpoint_directory / "latest.npz", **arguments)
 
 
-def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> NaiveCFR | CFR:
+def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> TabularSolver:
     """Construct the configured reference or optimised tabular solver."""
     if config.solver == "naive_cfr":
         return NaiveCFR(tabular_game.tree)
@@ -480,13 +486,34 @@ def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> 
         return NaiveCFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
     if config.solver == "cfr":
         return CFR(tabular_game.tree)
-    return CFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
+    if config.solver == "cfr_plus":
+        return CFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
+    if config.solver == "naive_mccfr":
+        return NaiveMCCFR(tabular_game.tree, seed=config.seed)
+    return MCCFR(tabular_game.tree, seed=config.seed)
 
 
 def _warm_up_optimised_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> None:
     """Compile a disposable Numba solver run outside measured training time."""
-    if config.solver in ("cfr", "cfr_plus"):
+    if config.solver in ("cfr", "cfr_plus", "mccfr"):
         _create_solver(config, tabular_game).train(1)
+
+
+def _restore_solver(solver: TabularSolver, checkpoint: LoadedTabularCheckpoint) -> None:
+    """Restore deterministic or sampled solver state through its exact contract."""
+    if isinstance(solver, (NaiveMCCFR, MCCFR)):
+        solver.restore_training_state(
+            iteration=checkpoint.metadata["iteration"],
+            regret_sum=checkpoint.regret_sum,
+            strategy_sum=checkpoint.strategy_sum,
+            rng_state=checkpoint.metadata["rng_state"],
+        )
+    else:
+        solver.restore_training_state(
+            iteration=checkpoint.metadata["iteration"],
+            regret_sum=checkpoint.regret_sum,
+            strategy_sum=checkpoint.strategy_sum,
+        )
 
 
 def _write_run_config(path: Path, config: TabularTrainingConfig, code_revision: str) -> None:

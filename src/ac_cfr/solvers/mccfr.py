@@ -1,5 +1,7 @@
 """Dense external-sampling MCCFR for Leduc poker."""
 
+from copy import deepcopy
+
 import numpy as np
 from numba import njit
 from numpy.random import Generator, default_rng
@@ -116,6 +118,39 @@ class MCCFR:
         )
         return average_policy
 
+    def training_rng_state(self) -> dict[str, object]:
+        """Return JSON-compatible chance and policy RNG state for checkpointing."""
+        return {
+            "format": "numpy_pcg64_v1",
+            "chance": deepcopy(self._chance_rng.bit_generator.state),
+            "policy": deepcopy(self._policy_rng.bit_generator.state),
+        }
+
+    def restore_training_state(
+        self,
+        *,
+        iteration: int,
+        regret_sum: NDArray[np.float64],
+        strategy_sum: NDArray[np.float64],
+        rng_state: object,
+    ) -> None:
+        """Restore validated tables and random streams from a checkpoint."""
+        _validate_non_negative_integer("iteration", iteration)
+        restored_regrets = self._validated_array(regret_sum, "regret_sum", non_negative=False)
+        restored_strategies = self._validated_array(
+            strategy_sum,
+            "strategy_sum",
+            non_negative=True,
+        )
+        chance_rng, policy_rng = _restore_numpy_streams(rng_state)
+
+        self._iteration = iteration
+        self._regret_sum[:] = restored_regrets
+        self._strategy_sum[:] = restored_strategies
+        self._chance_rng = chance_rng
+        self._policy_rng = policy_rng
+        self._update_current_policy()
+
     def _update_current_policy(self) -> None:
         """Rebuild every information-set strategy through regret matching."""
         _normalise_information_sets(
@@ -141,6 +176,24 @@ class MCCFR:
             action_end = action_start + int(count)
             rows.append(tuple(values[action_start:action_end].tolist()))
         return tuple(rows)
+
+    def _validated_array(
+        self,
+        values: NDArray[np.float64],
+        name: str,
+        *,
+        non_negative: bool,
+    ) -> NDArray[np.float64]:
+        """Return a finite compatible training-state array."""
+        if not isinstance(values, np.ndarray):
+            raise TypeError(f"{name} must be a NumPy array")
+        if values.shape != self._regret_sum.shape:
+            raise ValueError(f"{name} has an incompatible shape")
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} must contain only finite values")
+        if non_negative and np.any(values < 0.0):
+            raise ValueError(f"{name} must not contain negative values")
+        return np.asarray(values, dtype=np.float64)
 
 
 @njit(cache=True)
@@ -366,3 +419,48 @@ def _sample_position(
         if draw < cumulative_probability:
             return position
     return count - 1
+
+
+def _restore_numpy_streams(rng_state: object) -> tuple[Generator, Generator]:
+    """Validate checkpointed NumPy RNG states without mutating the solver."""
+    if not isinstance(rng_state, dict) or set(rng_state) != {"format", "chance", "policy"}:
+        raise ValueError("MCCFR RNG state fields are incomplete or unexpected")
+    if rng_state["format"] != "numpy_pcg64_v1":
+        raise ValueError("MCCFR RNG state format is incompatible")
+    return (
+        _restore_numpy_stream(rng_state["chance"]),
+        _restore_numpy_stream(rng_state["policy"]),
+    )
+
+
+def _restore_numpy_stream(value: object) -> Generator:
+    """Construct one NumPy generator from a validated PCG64 state."""
+    if not isinstance(value, dict) or set(value) != {
+        "bit_generator",
+        "state",
+        "has_uint32",
+        "uinteger",
+    }:
+        raise ValueError("MCCFR NumPy random stream state is invalid")
+    generator_state = value["state"]
+    if (
+        value["bit_generator"] != "PCG64"
+        or not isinstance(generator_state, dict)
+        or set(generator_state) != {"state", "inc"}
+        or any(
+            isinstance(item, bool) or not isinstance(item, int)
+            for item in (
+                generator_state["state"],
+                generator_state["inc"],
+                value["has_uint32"],
+                value["uinteger"],
+            )
+        )
+    ):
+        raise ValueError("MCCFR NumPy random stream state is invalid")
+    rng = default_rng()
+    try:
+        rng.bit_generator.state = deepcopy(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("MCCFR NumPy random stream state is invalid") from error
+    return rng

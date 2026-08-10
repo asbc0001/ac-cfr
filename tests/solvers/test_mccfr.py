@@ -107,6 +107,18 @@ def test_dense_mccfr_rejects_unsupported_games_and_invalid_counts() -> None:
     with pytest.raises(ValueError, match="only Leduc"):
         MCCFR(compile_game_tree(KuhnGame(), KuhnConfig()), seed=0)
 
+    solver.train(1)
+    regrets_before_restore = solver._regret_sum.copy()
+    with pytest.raises(ValueError, match="RNG state"):
+        solver.restore_training_state(
+            iteration=99,
+            regret_sum=solver._regret_sum,
+            strategy_sum=solver._strategy_sum,
+            rng_state={},
+        )
+    assert solver.iteration == 1
+    assert np.array_equal(solver._regret_sum, regrets_before_restore)
+
 
 def _flatten(table: tuple[tuple[float, ...], ...]) -> np.ndarray:
     return np.fromiter((value for row in table for value in row), dtype=np.float64)
