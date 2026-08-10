@@ -1,4 +1,4 @@
-"""Command-line entry point for repeated tabular solver timings."""
+"""Command-line entry point for tabular benchmarks and validation suites."""
 
 import argparse
 import json
@@ -8,13 +8,17 @@ from pathlib import Path
 
 from ac_cfr.benchmarking.cfr_gate import BENCHMARK_ID, run_cfr_gate
 from ac_cfr.benchmarking.harness import run_tabular_benchmark
+from ac_cfr.benchmarking.mccfr_reference_validation import (
+    VALIDATION_ID,
+    run_mccfr_reference_convergence_validation,
+)
 from ac_cfr.training.runner import SOLVER_IDS
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run a user-declared fixed benchmark workload and print JSON."""
-    parser = argparse.ArgumentParser(description="Benchmark tabular poker solvers.")
-    parser.add_argument("--suite", choices=("cfr-cfr-plus",))
+    """Run a declared benchmark workload or validation suite."""
+    parser = argparse.ArgumentParser(description="Benchmark and validate tabular poker solvers.")
+    parser.add_argument("--suite", choices=("cfr-cfr-plus", "mccfr-reference-convergence"))
     parser.add_argument("--output", type=Path)
     parser.add_argument("--game", choices=("kuhn", "leduc"))
     parser.add_argument("--solver", choices=SOLVER_IDS)
@@ -34,9 +38,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ):
             parser.error("--suite cannot be combined with individual-workload options")
-        output_directory = arguments.output or Path("results") / BENCHMARK_ID
-        gate_path = run_cfr_gate(output_directory, progress_callback=print)
-        print(f"gate: {gate_path}")
+        if arguments.suite == "cfr-cfr-plus":
+            output_directory = arguments.output or Path("results") / BENCHMARK_ID
+            result_path = run_cfr_gate(output_directory, progress_callback=print)
+            result_label = "gate"
+        else:
+            output_directory = arguments.output or Path("results") / VALIDATION_ID
+            result_path = run_mccfr_reference_convergence_validation(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "validation"
+        print(f"{result_label}: {result_path}")
         return 0
 
     if arguments.output is not None:
