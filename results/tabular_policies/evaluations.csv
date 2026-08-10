@@ -3,3 +3,4 @@ kuhn,kuhn,chip,cfr,kuhn-cfr-final,kuhn-cfr-final_iter_100000,kuhn-cfr-final_iter
 kuhn,kuhn,chip,cfr_plus,kuhn-cfr-plus-final,kuhn-cfr-plus-final_iter_100000,kuhn-cfr-plus-final_iter_100000,100000,0,-0.05555555551040203,2.152985248679573e-06,4.305970497359146e-06
 leduc,leduc,chip,cfr,leduc-cfr-final,leduc-cfr-final_iter_500000,leduc-cfr-final_iter_500000,500000,0,-0.08561024354978439,0.0001459455105554605,0.000291891021110921
 leduc,leduc,chip,cfr_plus,leduc-cfr-plus-final,leduc-cfr-plus-final_iter_500000,leduc-cfr-plus-final_iter_500000,500000,0,-0.08560642404145587,1.7214501552009764e-07,3.442900310401953e-07
+leduc,leduc,chip,mccfr,leduc-mccfr-final,leduc-mccfr-final-seed-20260810-iter-20000000,leduc-mccfr-final_iter_20000000,20000000,20260810,-0.08639315635093892,0.004500984526344891,0.009001969052689782

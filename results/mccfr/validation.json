@@ -1,0 +1,128 @@
+{
+  "about": "Machine-readable configuration, checks, and file index for the Leduc reference-versus-optimised MCCFR validation.",
+  "checks": [
+    {
+      "absolute_tolerance": 1e-12,
+      "maximum_average_policy_difference": 2.7755575615628914e-17,
+      "maximum_current_policy_difference": 1.1102230246251565e-16,
+      "maximum_regret_difference": 1.7763568394002505e-15,
+      "maximum_strategy_sum_difference": 1.1102230246251565e-16,
+      "name": "identical_draw_updates_match",
+      "passed": true
+    },
+    {
+      "iteration": 500000,
+      "name": "shared_workload_median_is_within_reference_seed_range",
+      "optimised_median_exploitability": 0.030801946517174335,
+      "passed": true,
+      "reference_seed_range": [
+        0.026759202650502092,
+        0.03651103400541847
+      ]
+    },
+    {
+      "exploitability_limit": 0.005,
+      "iteration": 20000000,
+      "median_exploitability": 0.004500984526344891,
+      "name": "final_median_reaches_cfr_cfr_plus_validation_ceiling",
+      "passed": true
+    },
+    {
+      "confidence_level": 0.99,
+      "name": "exported_snapshot_self_play_is_neutral",
+      "passed": true
+    }
+  ],
+  "code_revision": "e854687d04a28045eff00a8156db3ce31f3cbd12",
+  "configuration": {
+    "early_stopping": false,
+    "equivalence_absolute_tolerance": 1e-12,
+    "equivalence_iterations": 10,
+    "final_exploitability_limit": 0.005,
+    "game": "leduc",
+    "optimised_milestones": [
+      1000,
+      5000,
+      10000,
+      25000,
+      50000,
+      100000,
+      250000,
+      500000,
+      1000000,
+      2000000,
+      5000000,
+      10000000,
+      20000000
+    ],
+    "seeds": [
+      20260810,
+      20260811,
+      20260812,
+      20260813,
+      20260814
+    ],
+    "self_play_confidence_interval_method": "normal",
+    "self_play_confidence_level": 0.99,
+    "self_play_duplicate_pairs": 20000,
+    "self_play_hands": 40000,
+    "self_play_seed": 20260815,
+    "shared_milestones": [
+      1000,
+      5000,
+      10000,
+      25000,
+      50000,
+      100000,
+      250000,
+      500000
+    ],
+    "timed_region": "solver.train only",
+    "traversals_per_iteration": 2
+  },
+  "file_descriptions": {
+    "convergence": "Exact measurements for every implementation, seed, and milestone.",
+    "plot": "Multi-seed exploitability by MCCFR iterations and training time.",
+    "summary": "Median and full seed range for each implementation and milestone."
+  },
+  "files": {
+    "convergence": "convergence.csv",
+    "plot": "convergence.png",
+    "summary": "summary.csv"
+  },
+  "passed": true,
+  "selected_snapshot": {
+    "expected_value_player_zero": -0.08639315635093892,
+    "exploitability": 0.004500984526344891,
+    "iteration": 20000000,
+    "nash_conv": 0.009001969052689782,
+    "path": "artifacts/tabular/leduc-mccfr-final.npz",
+    "seed": 20260810,
+    "selection": "seed with the median final exploitability",
+    "snapshot_id": "leduc-mccfr-final-seed-20260810-iter-20000000",
+    "source_checkpoint": "runs/leduc-mccfr-final/checkpoints/latest.npz"
+  },
+  "self_play": {
+    "confidence_interval_high": 0.01866434703374463,
+    "confidence_interval_low": -0.03571434703374463,
+    "mean_chips": -0.008525,
+    "standard_error_chips": 0.010555570198803144
+  },
+  "tabular_references": {
+    "cfr": {
+      "expected_value_player_zero": -0.08561024354978439,
+      "exploitability": 0.0001459455105554605,
+      "iteration": 500000,
+      "nash_conv": 0.000291891021110921,
+      "source": "results/tabular_policies/evaluations.csv"
+    },
+    "cfr_plus": {
+      "expected_value_player_zero": -0.08560642404145587,
+      "exploitability": 1.7214501552009764e-07,
+      "iteration": 500000,
+      "nash_conv": 3.442900310401953e-07,
+      "source": "results/tabular_policies/evaluations.csv"
+    }
+  },
+  "validation_id": "mccfr"
+}

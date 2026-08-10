@@ -144,6 +144,32 @@
       "release_id": "local-tabular-final",
       "file_size": 4141,
       "sha256": "2838fa59bba8481d5006e337d4364d6aad0384c531234e9637af736b7f2a8d5d"
+    },
+    {
+      "strategy_id": "leduc_mccfr_final",
+      "label": "MCCFR final",
+      "game": "leduc",
+      "game_version": "leduc",
+      "algorithm": "mccfr",
+      "agent_type": "tabular",
+      "snapshot_id": "leduc-mccfr-final-seed-20260810-iter-20000000",
+      "training_iteration": 20000000,
+      "local_path": "artifacts/tabular/leduc-mccfr-final.npz",
+      "evaluation": {
+        "method": "exact_best_response",
+        "utility_unit": "chip",
+        "expected_value_player_zero": -0.08639315635093892,
+        "exploitability": 0.004500984526344891,
+        "nash_conv": 0.009001969052689782
+      },
+      "model_config_id": "tabular_average_strategy",
+      "state_encoding": "leduc",
+      "action_space": "poker",
+      "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
+      "artifact_schema_version": 1,
+      "release_id": "local-tabular-final",
+      "file_size": 14810,
+      "sha256": "5086c0b8905c80a200ca520d031b2543d66b5ba9a766877f0ee79ab270e9b03d"
     }
   ]
 }
