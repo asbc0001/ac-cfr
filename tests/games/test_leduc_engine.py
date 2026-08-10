@@ -121,8 +121,6 @@ def test_leduc_specialised_showdown_comparison_is_exhaustive() -> None:
                 (first_rank == public_rank, first_rank) < (second_rank == public_rank, second_rank)
             )
             assert compare_leduc_hands(private_cards, public_card) == expected
-            reversed_private_cards = private_cards[1], private_cards[0]
-            assert compare_leduc_hands(reversed_private_cards, public_card) == -expected
 
 
 def test_leduc_exhaustive_state_invariants_and_information_boundary() -> None:

@@ -152,7 +152,6 @@ def test_fold_and_showdown_utilities_use_exact_net_chip_accounting() -> None:
     assert folded.contributions == (2, 4)
     assert folded.utility(0) == -1.0
     assert folded.utility(1) == 1.0
-    assert folded.utility(0) == -folded.utility(1)
 
     winning_flop = _modified_flop((48, 44, 49, 45, 0, 5, 10))
     winning_turn = (

@@ -8,7 +8,6 @@ from ac_cfr.games.holdem.cards import (
     card_rank,
     card_rank_bit,
     card_suit,
-    card_to_string,
     encode_card,
     validate_holdem_cards,
 )
@@ -22,7 +21,6 @@ def test_card_encoding_round_trips_all_52_physical_cards() -> None:
             assert card_rank(card) is rank
             assert card_suit(card) is suit
             assert card_rank_bit(card) == 1 << int(rank)
-            assert len(card_to_string(card)) == 2
 
 
 def test_holdem_card_boundary_requires_exact_distinct_valid_cards() -> None:

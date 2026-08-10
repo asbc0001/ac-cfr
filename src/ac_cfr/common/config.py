@@ -21,4 +21,17 @@ class StateEncodingId(StrEnum):
 
     KUHN = "kuhn"
     LEDUC = "leduc"
+    LEDUC_NEURAL = "leduc_neural"
     HOLD_EM = "holdem"
+
+
+class ModelConfigId(StrEnum):
+    """Identifiers for reconstructable neural-network configurations."""
+
+    LEDUC_DEEP_CFR = "leduc_deep_cfr"
+
+
+class OptimizerId(StrEnum):
+    """Identifiers for configured neural-network optimisers."""
+
+    ADAM = "adam"

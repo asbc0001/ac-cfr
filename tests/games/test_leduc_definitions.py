@@ -31,8 +31,6 @@ def test_canonical_leduc_rules_and_utility_scale_are_fixed() -> None:
 
 
 def test_leduc_deck_retains_all_six_physical_cards() -> None:
-    assert len(LEDUC_DECK) == 6
-    assert len(set(LEDUC_DECK)) == 6
     assert tuple(range(6)) == LEDUC_DECK
 
     decoded_cards = {(card_rank(card), card_suit(card)) for card in LEDUC_DECK}

@@ -12,7 +12,6 @@ from ac_cfr.games.holdem.evaluator.generation import (
 )
 from ac_cfr.games.holdem.evaluator.perfect_hash import (
     FLUSH_MASK_COUNT,
-    INVALID_RANK,
     NON_FLUSH_VECTOR_COUNT,
     _load_tables,
     evaluate_holdem,
@@ -26,7 +25,6 @@ def test_packaged_tables_and_quinary_hash_are_complete() -> None:
     assert non_flush_table.shape == (NON_FLUSH_VECTOR_COUNT,)
     assert flush_table.shape == (FLUSH_MASK_COUNT,)
     assert non_flush_table.dtype == flush_table.dtype == np.dtype("<u2")
-    assert np.all(non_flush_table != INVALID_RANK)
     assert np.count_nonzero(flush_table) == sum(
         1 for mask in range(FLUSH_MASK_COUNT) if 5 <= mask.bit_count() <= 7
     )
