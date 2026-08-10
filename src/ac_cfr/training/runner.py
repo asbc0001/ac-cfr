@@ -1,4 +1,4 @@
-"""Checkpointed reference CFR and CFR+ training for Kuhn and Leduc poker."""
+"""Checkpointed CFR and CFR+ training for Kuhn and Leduc poker."""
 
 import json
 import re
@@ -20,16 +20,15 @@ from ac_cfr.persistence.checkpoints import (
 from ac_cfr.persistence.files import atomic_text_writer
 from ac_cfr.persistence.results import CsvResultStore
 from ac_cfr.persistence.snapshots import export_tabular_snapshot
-from ac_cfr.solvers.naive_cfr import NaiveCFR
-from ac_cfr.solvers.naive_cfr_plus import NaiveCFRPlus
+from ac_cfr.solvers import CFR, CFRPlus, NaiveCFR, NaiveCFRPlus
 
-SOLVER_IDS = ("naive_cfr", "naive_cfr_plus")
+SOLVER_IDS = ("naive_cfr", "naive_cfr_plus", "cfr", "cfr_plus")
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 @dataclass(frozen=True, slots=True)
 class TabularTrainingConfig:
-    """Complete predeclared schedule for one reference tabular training run."""
+    """Complete predeclared schedule for one tabular training run."""
 
     game: str
     solver: str
@@ -58,8 +57,8 @@ class TabularTrainingConfig:
         _validate_positive_integer("evaluation_interval", self.evaluation_interval)
         _validate_positive_integer("checkpoint_interval", self.checkpoint_interval)
         _validate_non_negative_integer("averaging_delay", self.averaging_delay)
-        if self.solver == "naive_cfr" and self.averaging_delay != 0:
-            raise ValueError("averaging_delay applies only to naive_cfr_plus")
+        if self.solver in ("naive_cfr", "cfr") and self.averaging_delay != 0:
+            raise ValueError("averaging_delay applies only to CFR+ solvers")
         if not isinstance(self.snapshot_iterations, tuple):
             raise TypeError("snapshot_iterations must be a tuple")
         if tuple(sorted(set(self.snapshot_iterations))) != self.snapshot_iterations:
@@ -143,7 +142,7 @@ def start_tabular_training(
     *,
     runs_root: Path = Path("runs"),
 ) -> TrainingOutcome:
-    """Start a reference CFR or CFR+ training run."""
+    """Start a CFR or CFR+ training run."""
     run_directory = runs_root / config.run_id
     if run_directory.exists():
         raise FileExistsError(f"run directory already exists: {run_directory}")
@@ -165,7 +164,7 @@ def start_tabular_training(
 
 
 def resume_tabular_training(checkpoint_path: Path) -> TrainingOutcome:
-    """Resume a reference CFR or CFR+ run from a checkpoint."""
+    """Resume a CFR or CFR+ run from a checkpoint."""
     checkpoint = load_tabular_checkpoint(checkpoint_path)
     config = TabularTrainingConfig.from_dict(checkpoint.metadata["training_config"])
     tabular_game = create_tabular_game(GameId(config.game))
@@ -207,7 +206,7 @@ def _execute_schedule(
     *,
     config: TabularTrainingConfig,
     tabular_game: TabularGame,
-    solver: NaiveCFR,
+    solver: NaiveCFR | CFR,
     run_directory: Path,
     result_store: CsvResultStore,
     elapsed_training_seconds: float,
@@ -352,7 +351,7 @@ def _update_early_stopping(
 def _save_checkpoint_pair(
     *,
     run_directory: Path,
-    solver: NaiveCFR,
+    solver: NaiveCFR | CFR,
     tabular_game: TabularGame,
     config: TabularTrainingConfig,
     elapsed_training_seconds: float,
@@ -382,10 +381,14 @@ def _save_checkpoint_pair(
     save_tabular_checkpoint(checkpoint_directory / "latest.npz", **arguments)
 
 
-def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> NaiveCFR:
+def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> NaiveCFR | CFR:
     if config.solver == "naive_cfr":
         return NaiveCFR(tabular_game.tree)
-    return NaiveCFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
+    if config.solver == "naive_cfr_plus":
+        return NaiveCFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
+    if config.solver == "cfr":
+        return CFR(tabular_game.tree)
+    return CFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
 
 
 def _write_run_config(path: Path, config: TabularTrainingConfig, code_revision: str) -> None:

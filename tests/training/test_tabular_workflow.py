@@ -28,15 +28,17 @@ from ac_cfr.training import (
 )
 
 
+@pytest.mark.parametrize("solver_id", ("naive_cfr", "cfr"))
 def test_checkpoint_resume_matches_uninterrupted_training_and_reconciles_metrics(
     tmp_path: Path,
+    solver_id: str,
 ) -> None:
     config = TabularTrainingConfig(
         game="kuhn",
-        solver="naive_cfr",
+        solver=solver_id,
         iterations=4,
         seed=7,
-        run_id="resume_test",
+        run_id=f"{solver_id}_resume_test",
         evaluation_interval=2,
         checkpoint_interval=2,
         snapshot_iterations=(2,),

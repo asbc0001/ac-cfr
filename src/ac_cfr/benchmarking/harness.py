@@ -7,6 +7,9 @@ from time import perf_counter
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import create_tabular_game
+from ac_cfr.games.tree import IndexedGameTree
+from ac_cfr.solvers.cfr import CFR
+from ac_cfr.solvers.cfr_plus import CFRPlus
 from ac_cfr.solvers.naive_cfr import NaiveCFR
 from ac_cfr.solvers.naive_cfr_plus import NaiveCFRPlus
 from ac_cfr.training.runner import SOLVER_IDS
@@ -44,17 +47,18 @@ def run_tabular_benchmark(
         raise TypeError("averaging_delay must be an integer")
     if averaging_delay < 0:
         raise ValueError("averaging_delay must not be negative")
-    if solver_id == "naive_cfr" and averaging_delay != 0:
-        raise ValueError("averaging_delay applies only to naive_cfr_plus")
+    if solver_id in ("naive_cfr", "cfr") and averaging_delay != 0:
+        raise ValueError("averaging_delay applies only to CFR+ solvers")
 
     tabular_game = create_tabular_game(GameId(game))
+    if solver_id in ("cfr", "cfr_plus"):
+        # Compile the numeric kernel before timing the fixed training workload.
+        _create_solver(tabular_game.tree, solver_id, averaging_delay).train(1)
+
     timings: list[float] = []
-    final_solver: NaiveCFR | None = None
+    final_solver: NaiveCFR | CFR | None = None
     for _ in range(repeats):
-        if solver_id == "naive_cfr":
-            solver = NaiveCFR(tabular_game.tree)
-        else:
-            solver = NaiveCFRPlus(tabular_game.tree, averaging_delay=averaging_delay)
+        solver = _create_solver(tabular_game.tree, solver_id, averaging_delay)
         start_time = perf_counter()
         solver.train(iterations)
         timings.append(perf_counter() - start_time)
@@ -76,6 +80,20 @@ def run_tabular_benchmark(
         traversals_per_second=traversals / median_seconds,
         exploitability=metrics.exploitability,
     )
+
+
+def _create_solver(
+    tree: IndexedGameTree,
+    solver_id: str,
+    averaging_delay: int,
+) -> NaiveCFR | CFR:
+    if solver_id == "naive_cfr":
+        return NaiveCFR(tree)
+    if solver_id == "naive_cfr_plus":
+        return NaiveCFRPlus(tree, averaging_delay=averaging_delay)
+    if solver_id == "cfr":
+        return CFR(tree)
+    return CFRPlus(tree, averaging_delay=averaging_delay)
 
 
 def _validate_positive_integer(name: str, value: int) -> None:

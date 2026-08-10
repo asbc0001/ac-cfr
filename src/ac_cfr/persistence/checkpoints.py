@@ -13,6 +13,7 @@ from ac_cfr.games.tabular import TabularGame
 from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, tree_compatibility_digest
 from ac_cfr.persistence.files import atomic_binary_writer
 from ac_cfr.persistence.results import RESULT_FIELDS, RESULT_KEY_FIELDS, ResultRecord
+from ac_cfr.solvers.cfr import CFR
 from ac_cfr.solvers.naive_cfr import NaiveCFR
 
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -31,7 +32,7 @@ class LoadedTabularCheckpoint:
 def save_tabular_checkpoint(
     path: Path,
     *,
-    solver: NaiveCFR,
+    solver: NaiveCFR | CFR,
     tabular_game: TabularGame,
     solver_id: str,
     run_id: str,

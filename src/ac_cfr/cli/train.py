@@ -14,7 +14,7 @@ from ac_cfr.training.runner import (
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run or resume one configured reference CFR training job."""
+    """Run or resume one configured CFR training job."""
     parser = _parser()
     arguments = parser.parse_args(argv)
     if arguments.resume is not None:
@@ -81,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train reference CFR or CFR+ on Kuhn or Leduc.")
+    parser = argparse.ArgumentParser(description="Train CFR or CFR+ on Kuhn or Leduc.")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--game", choices=("kuhn", "leduc"))
     parser.add_argument("--solver", choices=SOLVER_IDS)
