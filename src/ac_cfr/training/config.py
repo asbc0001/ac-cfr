@@ -19,6 +19,9 @@ class DeepCFRTrainingConfig:
     strategy_training_epochs: int
     batch_size: int
     learning_rate: float
+    validation_fraction: float
+    max_gradient_norm: float | None
+    dropout_probability: float
     seed: int
     snapshot_iterations: tuple[int, ...] = ()
     model_config_id: ModelConfigId = ModelConfigId.LEDUC_DEEP_CFR
@@ -39,10 +42,21 @@ class DeepCFRTrainingConfig:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise TypeError("seed must be an integer")
         SeedDeriver(self.seed)
-        if isinstance(self.learning_rate, bool) or not isinstance(self.learning_rate, (int, float)):
-            raise TypeError("learning_rate must be a real number")
-        if not isfinite(self.learning_rate) or self.learning_rate <= 0.0:
-            raise ValueError("learning_rate must be finite and positive")
+        _validate_positive_real("learning_rate", self.learning_rate)
+        if isinstance(self.validation_fraction, bool) or not isinstance(
+            self.validation_fraction, (int, float)
+        ):
+            raise TypeError("validation_fraction must be a real number")
+        if not isfinite(self.validation_fraction) or not 0.0 <= self.validation_fraction < 1.0:
+            raise ValueError("validation_fraction must be finite and between zero and one")
+        if self.max_gradient_norm is not None:
+            _validate_positive_real("max_gradient_norm", self.max_gradient_norm)
+        if isinstance(self.dropout_probability, bool) or not isinstance(
+            self.dropout_probability, (int, float)
+        ):
+            raise TypeError("dropout_probability must be a real number")
+        if not isfinite(self.dropout_probability) or not 0.0 <= self.dropout_probability < 1.0:
+            raise ValueError("dropout_probability must be finite and between zero and one")
         if not isinstance(self.snapshot_iterations, tuple):
             raise TypeError("snapshot_iterations must be a tuple")
         if tuple(sorted(set(self.snapshot_iterations))) != self.snapshot_iterations:
@@ -70,3 +84,10 @@ def _validate_positive_integer(name: str, value: int) -> None:
         raise TypeError(f"{name} must be an integer")
     if value < 1:
         raise ValueError(f"{name} must be positive")
+
+
+def _validate_positive_real(name: str, value: float) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a real number")
+    if not isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")

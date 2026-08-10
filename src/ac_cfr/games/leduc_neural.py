@@ -19,6 +19,8 @@ from ac_cfr.games.tree import IndexedGameTree
 LEDUC_NEURAL_STATE_ENCODING_ID = StateEncodingId.LEDUC_NEURAL
 LEDUC_NEURAL_STATE_SIZE = 37
 LEDUC_ACTION_COUNT = len(ACTION_ORDER)
+# Every feature is already a binary one-hot indicator, so no further scaling is applied.
+LEDUC_NEURAL_INPUT_SCALING = "binary_0_1"
 
 _FIRST_ROUND_ACTION_SLOTS = 4
 _SECOND_ROUND_ACTION_SLOTS = 3

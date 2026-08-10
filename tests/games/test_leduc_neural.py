@@ -4,6 +4,7 @@ from ac_cfr.games.base import ACTION_ORDER, Action
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.leduc_neural import (
     LEDUC_ACTION_COUNT,
+    LEDUC_NEURAL_INPUT_SCALING,
     LEDUC_NEURAL_STATE_SIZE,
     build_leduc_neural_data,
 )
@@ -17,6 +18,8 @@ def test_leduc_neural_inputs_are_fixed_lossless_and_match_legal_actions() -> Non
     assert neural_data.states.shape == (tree.information_set_count, LEDUC_NEURAL_STATE_SIZE)
     assert neural_data.action_masks.shape == (tree.information_set_count, LEDUC_ACTION_COUNT)
     assert neural_data.states.dtype == np.float32
+    assert LEDUC_NEURAL_INPUT_SCALING == "binary_0_1"
+    assert set(np.unique(neural_data.states)) == {0.0, 1.0}
     assert neural_data.action_masks.dtype == np.bool
     assert len(np.unique(neural_data.states, axis=0)) == tree.information_set_count
     assert not neural_data.states.flags.writeable

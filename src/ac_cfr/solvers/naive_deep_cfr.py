@@ -1,5 +1,6 @@
 """Reference external-sampling Deep CFR for Leduc poker."""
 
+from dataclasses import dataclass
 from math import fsum, isfinite
 from random import Random
 
@@ -14,6 +15,29 @@ from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.models import DeepCFRNetwork, build_deep_cfr_network
 from ac_cfr.training.config import DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import AdvantageSample, StrategySample, UniformReservoir
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkTrainingMetrics:
+    """Final held-out losses and sample counts for one freshly trained network."""
+
+    iteration: int
+    network_role: str
+    player: int | None
+    training_samples: int
+    validation_samples: int
+    training_loss: float
+    validation_loss: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class _LossMetrics:
+    """Internal loss result before network context is attached."""
+
+    training_samples: int
+    validation_samples: int
+    training_loss: float
+    validation_loss: float | None
 
 
 class NaiveDeepCFR:
@@ -51,6 +75,7 @@ class NaiveDeepCFR:
         self._advantage_networks: list[DeepCFRNetwork | None] = [None, None]
         self._snapshot_networks: dict[int, DeepCFRNetwork] = {}
         self._final_strategy_network: DeepCFRNetwork | None = None
+        self._training_metrics: list[NetworkTrainingMetrics] = []
         self._iteration = 0
 
     @property
@@ -84,6 +109,11 @@ class NaiveDeepCFR:
     def final_strategy_network(self) -> DeepCFRNetwork | None:
         """Return the final playable network once the configured run completes."""
         return self._final_strategy_network
+
+    @property
+    def training_metrics(self) -> tuple[NetworkTrainingMetrics, ...]:
+        """Return completed advantage and strategy network training measurements."""
+        return tuple(self._training_metrics)
 
     def train(self, iterations: int) -> None:
         """Run complete alternating outer iterations up to the configured budget."""
@@ -227,7 +257,7 @@ class NaiveDeepCFR:
         """Train a freshly initialised network over one player's full reservoir."""
         seed_index = _network_seed_index(player, iteration)
         network = self._new_network(seed_index)
-        _train_network(
+        losses = _train_network(
             network=network,
             samples=self._advantage_reservoirs[player].samples,
             current_iteration=iteration,
@@ -236,6 +266,19 @@ class NaiveDeepCFR:
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             strategy_targets=False,
+            validation_fraction=self._config.validation_fraction,
+            max_gradient_norm=self._config.max_gradient_norm,
+        )
+        self._training_metrics.append(
+            NetworkTrainingMetrics(
+                iteration=iteration,
+                network_role="advantage",
+                player=player,
+                training_samples=losses.training_samples,
+                validation_samples=losses.validation_samples,
+                training_loss=losses.training_loss,
+                validation_loss=losses.validation_loss,
+            )
         )
         return network
 
@@ -243,7 +286,7 @@ class NaiveDeepCFR:
         """Train and freeze one playable average-strategy network."""
         seed_index = _network_seed_index(2, iteration)
         network = self._new_network(seed_index)
-        _train_network(
+        losses = _train_network(
             network=network,
             samples=self._strategy_reservoir.samples,
             current_iteration=iteration,
@@ -252,6 +295,19 @@ class NaiveDeepCFR:
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             strategy_targets=True,
+            validation_fraction=self._config.validation_fraction,
+            max_gradient_norm=self._config.max_gradient_norm,
+        )
+        self._training_metrics.append(
+            NetworkTrainingMetrics(
+                iteration=iteration,
+                network_role="strategy",
+                player=None,
+                training_samples=losses.training_samples,
+                validation_samples=losses.validation_samples,
+                training_loss=losses.training_loss,
+                validation_loss=losses.validation_loss,
+            )
         )
         for parameter in network.parameters():
             parameter.requires_grad_(False)
@@ -262,7 +318,10 @@ class NaiveDeepCFR:
         """Construct a normally initialised network without changing global RNG state."""
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(self._seed(RngStream.NETWORK, seed_index))
-            return build_deep_cfr_network(self._config.model_config_id)
+            return build_deep_cfr_network(
+                self._config.model_config_id,
+                dropout_probability=self._config.dropout_probability,
+            )
 
     def _seed(self, stream: RngStream, index: int) -> int:
         return SeedDeriver(self._config.seed).derive(stream, index)
@@ -320,10 +379,16 @@ def linear_cfr_loss(
     transformed_predictions = (
         _masked_softmax(predictions, action_masks) if strategy_targets else predictions
     )
+    _require_finite_tensor("predictions", predictions)
+    _require_finite_tensor("targets", targets)
+    _require_finite_tensor("transformed predictions", transformed_predictions)
+    _require_finite_tensor("sample iterations", sample_iterations)
     squared_errors = (transformed_predictions - targets).square()
     per_sample_errors = (squared_errors * action_masks).sum(dim=1)
     weights = 2.0 * sample_iterations / current_iteration
-    return (weights * per_sample_errors).mean()
+    loss = (weights * per_sample_errors).mean()
+    _require_finite_tensor("loss", loss)
+    return loss
 
 
 def _masked_softmax(logits: Tensor, action_masks: Tensor) -> Tensor:
@@ -341,7 +406,9 @@ def _train_network(
     learning_rate: float,
     data_seed: int,
     strategy_targets: bool,
-) -> None:
+    validation_fraction: float,
+    max_gradient_norm: float | None,
+) -> _LossMetrics:
     """Train one network with deterministic shuffled PyTorch minibatches."""
     if not samples:
         raise ValueError("cannot train a network from an empty reservoir")
@@ -357,11 +424,15 @@ def _train_network(
     sample_iterations = torch.tensor([sample.iteration for sample in samples], dtype=torch.float32)
     optimiser = torch.optim.Adam(network.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(data_seed)
+    training_indices, validation_indices = _split_training_indices(
+        len(samples), validation_fraction, generator
+    )
+    _require_finite_parameters(network)
     network.train()
 
     for _ in range(epochs):
-        order = torch.randperm(len(samples), generator=generator)
-        for start in range(0, len(samples), batch_size):
+        order = training_indices[torch.randperm(len(training_indices), generator=generator)]
+        for start in range(0, len(training_indices), batch_size):
             indices = order[start : start + batch_size]
             optimiser.zero_grad(set_to_none=True)
             loss = linear_cfr_loss(
@@ -373,8 +444,99 @@ def _train_network(
                 strategy_targets=strategy_targets,
             )
             loss.backward()
+            _require_finite_gradients(network)
+            if max_gradient_norm is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    network.parameters(),
+                    max_gradient_norm,
+                    error_if_nonfinite=True,
+                )
             optimiser.step()
+            _require_finite_parameters(network)
     network.eval()
+    training_loss = _evaluate_network_loss(
+        network,
+        states,
+        targets,
+        action_masks,
+        sample_iterations,
+        training_indices,
+        current_iteration,
+        strategy_targets=strategy_targets,
+    )
+    validation_loss = (
+        _evaluate_network_loss(
+            network,
+            states,
+            targets,
+            action_masks,
+            sample_iterations,
+            validation_indices,
+            current_iteration,
+            strategy_targets=strategy_targets,
+        )
+        if len(validation_indices) > 0
+        else None
+    )
+    return _LossMetrics(
+        training_samples=len(training_indices),
+        validation_samples=len(validation_indices),
+        training_loss=training_loss,
+        validation_loss=validation_loss,
+    )
+
+
+def _split_training_indices(
+    sample_count: int,
+    validation_fraction: float,
+    generator: torch.Generator,
+) -> tuple[Tensor, Tensor]:
+    """Return one deterministic split with no overlap for the current fresh network."""
+    indices = torch.randperm(sample_count, generator=generator)
+    if sample_count < 2 or validation_fraction == 0.0:
+        return indices, torch.empty(0, dtype=torch.int64)
+    validation_count = min(sample_count - 1, max(1, int(sample_count * validation_fraction)))
+    return indices[validation_count:], indices[:validation_count]
+
+
+def _evaluate_network_loss(
+    network: DeepCFRNetwork,
+    states: Tensor,
+    targets: Tensor,
+    action_masks: Tensor,
+    sample_iterations: Tensor,
+    indices: Tensor,
+    current_iteration: int,
+    *,
+    strategy_targets: bool,
+) -> float:
+    """Evaluate one fixed subset with dropout disabled and gradients omitted."""
+    with torch.inference_mode():
+        loss = linear_cfr_loss(
+            network(states[indices]),
+            targets[indices],
+            action_masks[indices],
+            sample_iterations[indices],
+            current_iteration,
+            strategy_targets=strategy_targets,
+        )
+    return float(loss)
+
+
+def _require_finite_tensor(name: str, values: Tensor) -> None:
+    if not bool(torch.isfinite(values).all()):
+        raise FloatingPointError(f"{name} must contain only finite values")
+
+
+def _require_finite_gradients(network: DeepCFRNetwork) -> None:
+    for parameter in network.parameters():
+        if parameter.grad is not None:
+            _require_finite_tensor("gradients", parameter.grad)
+
+
+def _require_finite_parameters(network: DeepCFRNetwork) -> None:
+    for parameter in network.parameters():
+        _require_finite_tensor("network parameters", parameter)
 
 
 def _local_action_values(

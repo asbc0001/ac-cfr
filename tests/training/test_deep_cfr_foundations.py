@@ -23,6 +23,9 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
         strategy_training_epochs=8,
         batch_size=128,
         learning_rate=1e-3,
+        validation_fraction=0.1,
+        max_gradient_norm=10.0,
+        dropout_probability=0.0,
         seed=2026,
         snapshot_iterations=(25, 100),
     )
@@ -31,6 +34,9 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
 
     assert config.model_config_id is ModelConfigId.LEDUC_DEEP_CFR
     assert config.state_encoding_id is StateEncodingId.LEDUC_NEURAL
+    assert config.validation_fraction == 0.1
+    assert config.max_gradient_norm == 10.0
+    assert config.dropout_probability == 0.0
     assert config.to_dict()["snapshot_iterations"] == [25, 100]
     assert advantage_sample.iteration == strategy_sample.iteration == 3
     assert DEEP_CFR_RESERVOIR_SCHEMA_VERSION == 1

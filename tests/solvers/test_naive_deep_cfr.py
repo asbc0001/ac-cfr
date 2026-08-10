@@ -88,6 +88,9 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
         strategy_training_epochs=1,
         batch_size=128,
         learning_rate=1e-3,
+        validation_fraction=0.1,
+        max_gradient_norm=10.0,
+        dropout_probability=0.0,
         seed=2026,
         snapshot_iterations=(1,),
     )
@@ -134,3 +137,23 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
         )
         for sample in solver.strategy_reservoir.samples
     )
+    assert len(solver.training_metrics) == 6
+    assert all(metric.training_samples > 0 for metric in solver.training_metrics)
+    assert all(
+        np.isfinite(metric.training_loss)
+        and (metric.validation_loss is None or np.isfinite(metric.validation_loss))
+        for metric in solver.training_metrics
+    )
+    assert any(metric.validation_samples > 0 for metric in solver.training_metrics)
+
+
+def test_linear_cfr_loss_rejects_non_finite_network_output() -> None:
+    with pytest.raises(FloatingPointError, match="predictions"):
+        linear_cfr_loss(
+            torch.tensor(((float("nan"), 0.0, 0.0),)),
+            torch.zeros((1, 3)),
+            torch.tensor(((True, True, False),)),
+            torch.ones(1),
+            current_iteration=1,
+            strategy_targets=False,
+        )

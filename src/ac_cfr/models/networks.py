@@ -1,11 +1,16 @@
 """Reconstructable PyTorch networks used by Deep CFR."""
 
 from dataclasses import dataclass
+from math import isfinite
 
 from torch import Tensor, nn
 
 from ac_cfr.common.config import ModelConfigId
-from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, LEDUC_NEURAL_STATE_SIZE
+from ac_cfr.games.leduc_neural import (
+    LEDUC_ACTION_COUNT,
+    LEDUC_NEURAL_INPUT_SCALING,
+    LEDUC_NEURAL_STATE_SIZE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +21,8 @@ class DeepCFRNetworkConfig:
     input_size: int
     hidden_sizes: tuple[int, ...]
     output_size: int
+    input_scaling: str
+    dropout_probability: float = 0.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_config_id, ModelConfigId):
@@ -32,6 +39,14 @@ class DeepCFRNetworkConfig:
                 raise TypeError("hidden sizes must be integers")
             if hidden_size < 1:
                 raise ValueError("hidden sizes must be positive")
+        if not isinstance(self.input_scaling, str) or not self.input_scaling:
+            raise ValueError("input_scaling must be a non-empty string")
+        if isinstance(self.dropout_probability, bool) or not isinstance(
+            self.dropout_probability, (int, float)
+        ):
+            raise TypeError("dropout_probability must be a real number")
+        if not isfinite(self.dropout_probability) or not 0.0 <= self.dropout_probability < 1.0:
+            raise ValueError("dropout_probability must be finite and between zero and one")
 
 
 LEDUC_DEEP_CFR_NETWORK = DeepCFRNetworkConfig(
@@ -39,6 +54,7 @@ LEDUC_DEEP_CFR_NETWORK = DeepCFRNetworkConfig(
     input_size=LEDUC_NEURAL_STATE_SIZE,
     hidden_sizes=(64, 64, 64),
     output_size=LEDUC_ACTION_COUNT,
+    input_scaling=LEDUC_NEURAL_INPUT_SCALING,
 )
 
 _NETWORK_CONFIGS = {
@@ -59,6 +75,8 @@ class DeepCFRNetwork(nn.Module):
         layer_input_size = config.input_size
         for hidden_size in config.hidden_sizes:
             layers.extend((nn.Linear(layer_input_size, hidden_size), nn.ReLU()))
+            if config.dropout_probability > 0.0:
+                layers.append(nn.Dropout(config.dropout_probability))
             layer_input_size = hidden_size
         layers.append(nn.Linear(layer_input_size, config.output_size))
         self.layers = nn.Sequential(*layers)
@@ -68,8 +86,21 @@ class DeepCFRNetwork(nn.Module):
         return self.layers(states)
 
 
-def build_deep_cfr_network(model_config_id: ModelConfigId) -> DeepCFRNetwork:
+def build_deep_cfr_network(
+    model_config_id: ModelConfigId,
+    *,
+    dropout_probability: float = 0.0,
+) -> DeepCFRNetwork:
     """Construct the exact network selected by a stable model identifier."""
     if not isinstance(model_config_id, ModelConfigId):
         raise TypeError("model_config_id must be a ModelConfigId")
-    return DeepCFRNetwork(_NETWORK_CONFIGS[model_config_id])
+    base_config = _NETWORK_CONFIGS[model_config_id]
+    config = DeepCFRNetworkConfig(
+        model_config_id=base_config.model_config_id,
+        input_size=base_config.input_size,
+        hidden_sizes=base_config.hidden_sizes,
+        output_size=base_config.output_size,
+        input_scaling=base_config.input_scaling,
+        dropout_probability=dropout_probability,
+    )
+    return DeepCFRNetwork(config)
