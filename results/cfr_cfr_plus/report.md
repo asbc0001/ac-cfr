@@ -6,6 +6,8 @@
 
 Reference and optimised CFR/CFR+ use the same indexed Kuhn/Leduc trees, algorithm settings, exact evaluator, iteration counts, and action ordering. One iteration is two full-tree traversals, one for each traversing player.
 
+All values use the games' base chip unit and are reported per hand. Each player antes 1 chip, creating a 2-chip starting pot in both games. Kuhn bets are 1 chip; Leduc bets are 2 chips in the first round and 4 chips in the second round.
+
 Measured environment: 8 available CPUs, 15.4 GiB RAM, Python 3.12.3 on `Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39`.
 
 ## Correctness and convergence
@@ -19,9 +21,9 @@ Each reference/optimised solver pair is compared after 1 and 3 iterations for bo
 | Leduc | CFR | 5,000 | 0.0032213533 | 0.0033375035 | 0.00011615029 | PASS |
 | Leduc | CFR+ | 5,000 | 1.3825689e-05 | 1.7358688e-05 | 3.5329985e-06 | PASS |
 
-Kuhn poker has a known equilibrium value: Player 0 expects to lose 1/18 of a chip per hand, about 0.05556 chips, when both players use equilibrium strategies. The measured value is checked against this result. Leduc uses exact best-response exploitability and cross-implementation agreement because no independent equilibrium value is used here.
+Kuhn poker has a known equilibrium value: Player 0 expects to lose 1/18 of the 1-chip ante per hand, about 0.05556 chips or 5.56% of one ante, when both players use equilibrium strategies. The measured value is checked against this result. Leduc uses exact best-response exploitability and cross-implementation agreement because no independent equilibrium value is used here.
 
-Kuhn must reach at most 0.001-chip exploitability and 0.0001-chip value error. Leduc must reach at most 0.005-chip exploitability. Reference/optimised exploitability gaps are limited to 0.0002 chip on Kuhn and 0.001 chip on Leduc, one fifth of their quality ceilings. These thresholds were fixed before this run.
+Kuhn must reach exploitability of at most 0.001 chips and a value error of at most 0.0001 chips. Leduc must reach exploitability of at most 0.005 chips. Reference/optimised exploitability gaps are limited to 0.0002 chips on Kuhn and 0.001 chips on Leduc, one fifth of their quality ceilings. These thresholds were fixed before this run.
 
 | Game | Algorithm | Reference P0 value | Optimised P0 value | Reference NashConv | Optimised NashConv |
 |---|---:|---:|---:|---:|---:|

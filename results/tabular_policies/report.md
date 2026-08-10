@@ -12,7 +12,7 @@ CFR+ used an averaging delay of 10 iterations, matching its validated configurat
 
 ## Exact evaluation
 
-Lower exploitability is better. Player 0 value is the expected number of chips won or lost per hand when both players use the saved policy.
+All values use the games' base chip unit and are reported per hand. Each player antes 1 chip, creating a 2-chip starting pot in both games. Kuhn bets are 1 chip; Leduc bets are 2 chips in the first round and 4 chips in the second round. Lower exploitability is better. Player 0 value is the expected number of chips won or lost per hand when both players use the saved policy.
 
 | Game | Policy | Iterations | Player 0 value | Exploitability | NashConv | Target | Solver time |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -21,7 +21,7 @@ Lower exploitability is better. Player 0 value is the expected number of chips w
 | Leduc | CFR | 500,000 | -0.08561024 | 0.00014595 | 0.00029189 | <= 0.0005 | 80.391 s |
 | Leduc | CFR+ | 500,000 | -0.08560642 | 0.00000017 | 0.00000034 | <= 0.0005 | 76.935 s |
 
-Against Kuhn's known Player 0 equilibrium value of `-1/18`, the CFR value error was approximately `0.00000031` chips and the CFR+ value error was below `0.00000000005` chips.
+Against Kuhn's known Player 0 equilibrium value of `-1/18` of the 1-chip ante per hand, the CFR value error was approximately `0.00000031` chips and the CFR+ value error was below `0.00000000005` chips.
 
 The policies were evaluated with the independent exact best-response evaluator. Full-precision values and provenance identifiers are stored in `evaluations.csv` and `configs/strategy_registry.json`.
 
