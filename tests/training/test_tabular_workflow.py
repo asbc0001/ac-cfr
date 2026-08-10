@@ -213,6 +213,27 @@ def test_training_command_uses_useful_output_defaults(
     assert len(tuple((run_directory / "strategy_snapshots").glob("*.npz"))) == 1
     assert len(tuple((run_directory / "checkpoints").glob("*.npz"))) == 11
     assert (run_directory / "plots" / "training_diagnostics.png").stat().st_size > 0
+    summary = (run_directory / "summary.txt").read_text(encoding="utf-8")
+    assert "Status: completed" in summary
+    assert "Iterations: 200" in summary
+    assert "Exact exploitability:" in summary
+
+    comparison_config = TabularTrainingConfig(
+        game="kuhn",
+        solver="naive_cfr",
+        iterations=1,
+        seed=0,
+        run_id="comparison_reference",
+        evaluation_interval=1,
+        checkpoint_interval=1,
+        snapshot_iterations=(),
+    )
+    comparison_outcome = start_tabular_training(comparison_config, runs_root=tmp_path)
+    assert plot_main((str(run_directory), str(comparison_outcome.run_directory))) == 0
+    comparison_plot = (
+        tmp_path / "plots" / "exploitability_comparison__cli_defaults__comparison_reference.png"
+    )
+    assert comparison_plot.stat().st_size > 0
 
 
 def _registry_for_snapshot(snapshot_path: Path, game_id: GameId) -> dict[str, object]:

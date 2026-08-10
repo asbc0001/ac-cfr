@@ -330,13 +330,63 @@ def _execute_schedule(
             result_store=result_store,
             code_revision=code_revision,
         )
-    return TrainingOutcome(
+    outcome = TrainingOutcome(
         run_directory=run_directory,
         latest_checkpoint=latest_checkpoint,
         final_iteration=solver.iteration,
         stopped_early=stopped_early,
         snapshot_paths=tuple(snapshot_paths),
     )
+    _write_training_summary(outcome, result_store)
+    return outcome
+
+
+def _write_training_summary(
+    outcome: TrainingOutcome,
+    result_store: TrainingMetricStore,
+) -> None:
+    records = tuple(record for record in result_store.records if record["exploitability"])
+    if not records:
+        return
+    final_record = max(records, key=lambda record: int(record["iteration"]))
+    status = "stopped early" if outcome.stopped_early else "completed"
+    snapshot = final_record["strategy_snapshot_id"] or "none"
+    lines = (
+        f"Run: {final_record['run_id']}",
+        f"Game: {final_record['game'].capitalize()}",
+        f"Solver: {_summary_solver_label(final_record['solver'])}",
+        f"Status: {status}",
+        f"Iterations: {int(final_record['iteration']):,}",
+        (
+            "Player 0 average-policy value: "
+            f"{float(final_record['expected_value_player_zero']):.12g} chips"
+        ),
+        f"Exact exploitability: {float(final_record['exploitability']):.12g} chips",
+        f"NashConv: {float(final_record['nash_conv']):.12g} chips",
+        (f"Solver training time: {float(final_record['elapsed_training_seconds']):.6g} seconds"),
+        (
+            "Average traversal throughput: "
+            f"{float(final_record['traversals_per_second']):.6g} traversals/second"
+        ),
+        f"Final checkpoint: {outcome.latest_checkpoint.relative_to(outcome.run_directory)}",
+        (
+            f"Final strategy snapshot: strategy_snapshots/{snapshot}.npz"
+            if snapshot != "none"
+            else "Final strategy snapshot: none"
+        ),
+    )
+    with atomic_text_writer(outcome.run_directory / "summary.txt") as summary_file:
+        summary_file.write("\n".join(lines))
+        summary_file.write("\n")
+
+
+def _summary_solver_label(solver: str) -> str:
+    return {
+        "cfr": "CFR (optimised)",
+        "cfr_plus": "CFR+ (optimised)",
+        "naive_cfr": "CFR (reference)",
+        "naive_cfr_plus": "CFR+ (reference)",
+    }[solver]
 
 
 def _remaining_milestones(

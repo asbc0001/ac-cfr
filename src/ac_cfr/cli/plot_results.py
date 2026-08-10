@@ -1,6 +1,7 @@
 """Command-line entry point for exact-metric result plots."""
 
 import argparse
+import csv
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -39,14 +40,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif arguments.metric is None:
         output_path = arguments.output or _default_output_path(
             arguments.inputs,
-            filename="exploitability_comparison.png",
+            filename=_comparison_filename(result_paths, plot_name="exploitability_comparison"),
         )
         plot_exploitability_comparison(result_paths, output_path)
     else:
         metric = arguments.metric
+        plot_name = f"{metric}_by_{arguments.x_axis}"
+        filename = (
+            _comparison_filename(result_paths, plot_name=plot_name)
+            if len(result_paths) > 1
+            else f"{plot_name}.png"
+        )
         output_path = arguments.output or _default_output_path(
             arguments.inputs,
-            filename=f"{metric}_by_{arguments.x_axis}.png",
+            filename=filename,
         )
         plot_exact_metric(
             result_paths,
@@ -66,3 +73,17 @@ def _default_output_path(inputs: list[Path], *, filename: str) -> Path:
     input_parents = {input_path.parent for input_path in inputs}
     parent = input_parents.pop() if len(input_parents) == 1 else Path.cwd()
     return parent / "plots" / filename
+
+
+def _comparison_filename(result_paths: tuple[Path, ...], *, plot_name: str) -> str:
+    run_ids: list[str] = []
+    for result_path in result_paths:
+        with result_path.open(encoding="utf-8", newline="") as results_file:
+            reader = csv.DictReader(results_file)
+            if "run_id" not in (reader.fieldnames or ()):
+                raise ValueError(f"results file is missing run_id: {result_path}")
+            file_run_ids = {record["run_id"] for record in reader if record["run_id"]}
+        if not file_run_ids:
+            raise ValueError(f"results file contains no run IDs: {result_path}")
+        run_ids.extend(sorted(file_run_ids))
+    return f"{plot_name}__{'__'.join(dict.fromkeys(run_ids))}.png"

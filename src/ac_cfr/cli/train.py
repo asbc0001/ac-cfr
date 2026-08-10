@@ -80,6 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     print(f"run: {outcome.run_directory}")
+    print(f"summary: {outcome.run_directory / 'summary.txt'}")
     print(f"iteration: {outcome.final_iteration}")
     print(f"checkpoint: {outcome.latest_checkpoint}")
     for snapshot_path in outcome.snapshot_paths:

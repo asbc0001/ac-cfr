@@ -1,7 +1,6 @@
 """Training diagnostics and exact-exploitability comparison plots."""
 
 import csv
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -210,16 +209,10 @@ def _plot_series(
 def _series_labels(
     keys: tuple[tuple[str, str, str, str], ...],
 ) -> dict[tuple[str, str, str, str], str]:
-    base_counts = Counter((game, solver) for game, solver, _, _ in keys)
     labels: dict[tuple[str, str, str, str], str] = {}
     for key in keys:
         game, solver, run_id, seed = key
-        base_label = f"{game.capitalize()} {_solver_label(solver)}"
-        labels[key] = (
-            base_label
-            if base_counts[(game, solver)] == 1
-            else f"{base_label} ({run_id}, seed {seed})"
-        )
+        labels[key] = f"{game.capitalize()} {_solver_label(solver)} ({run_id}, seed {seed})"
     return labels
 
 
