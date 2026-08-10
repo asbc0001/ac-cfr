@@ -1,0 +1,5 @@
+game,game_version,utility_unit,solver,run_id,strategy_snapshot_id,source_checkpoint_id,iteration,seed,expected_value_player_zero,exploitability,nash_conv
+kuhn,kuhn,chip,cfr,kuhn-cfr-final,kuhn-cfr-final_iter_100000,kuhn-cfr-final_iter_100000,100000,0,-0.05555524664108136,1.7186819951581223e-05,3.4373639903162445e-05
+kuhn,kuhn,chip,cfr_plus,kuhn-cfr-plus-final,kuhn-cfr-plus-final_iter_100000,kuhn-cfr-plus-final_iter_100000,100000,0,-0.05555555551040203,2.152985248679573e-06,4.305970497359146e-06
+leduc,leduc,chip,cfr,leduc-cfr-final,leduc-cfr-final_iter_500000,leduc-cfr-final_iter_500000,500000,0,-0.08561024354978439,0.0001459455105554605,0.000291891021110921
+leduc,leduc,chip,cfr_plus,leduc-cfr-plus-final,leduc-cfr-plus-final_iter_500000,leduc-cfr-plus-final_iter_500000,500000,0,-0.08560642404145587,1.7214501552009764e-07,3.442900310401953e-07
