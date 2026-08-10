@@ -1,9 +1,11 @@
 """Command-line entry point for checkpointed tabular poker training."""
 
 import argparse
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from ac_cfr.evaluation.plotting import plot_training_diagnostics
+from ac_cfr.persistence.results import TrainingMetricStore
 from ac_cfr.training.runner import (
     SOLVER_IDS,
     TabularTrainingConfig,
@@ -17,6 +19,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run or resume one configured CFR training job."""
     parser = _parser()
     arguments = parser.parse_args(argv)
+    report_progress = _progress_reporter()
     if arguments.resume is not None:
         if any(
             value is not None
@@ -36,17 +39,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ):
             parser.error("--resume cannot be combined with new-run options")
-        outcome = resume_tabular_training(arguments.resume)
+        outcome = resume_tabular_training(
+            arguments.resume,
+            progress_callback=report_progress,
+        )
     else:
         if arguments.game is None or arguments.solver is None or arguments.iterations is None:
             parser.error("new training requires --game, --solver, and --iterations")
         evaluation_interval = (
-            arguments.iterations
+            _interval_for_target_count(arguments.iterations, target_count=100)
             if arguments.evaluation_interval is None
             else arguments.evaluation_interval
         )
         checkpoint_interval = (
-            evaluation_interval
+            _interval_for_target_count(arguments.iterations, target_count=10)
             if arguments.checkpoint_interval is None
             else arguments.checkpoint_interval
         )
@@ -70,6 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         outcome = start_tabular_training(
             config,
             runs_root=Path("runs") if arguments.runs_root is None else arguments.runs_root,
+            progress_callback=report_progress,
         )
 
     print(f"run: {outcome.run_directory}")
@@ -77,6 +84,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"checkpoint: {outcome.latest_checkpoint}")
     for snapshot_path in outcome.snapshot_paths:
         print(f"snapshot: {snapshot_path}")
+    _print_final_metrics(outcome.run_directory / "metrics.csv")
+    if arguments.plot:
+        plot_path = outcome.run_directory / "plots" / "training_diagnostics.png"
+        plot_training_diagnostics(outcome.run_directory / "metrics.csv", plot_path)
+        print(f"plot: {plot_path}")
     return 0
 
 
@@ -98,6 +110,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--averaging-delay", type=int)
     parser.add_argument("--early-stopping-minimum-improvement", type=float)
     parser.add_argument("--early-stopping-patience", type=int)
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Create training diagnostics after training.",
+    )
     return parser
 
 
@@ -108,3 +125,38 @@ def _parse_iterations(value: str | None) -> tuple[int, ...]:
         return tuple(sorted({int(item.strip()) for item in value.split(",")}))
     except ValueError as error:
         raise ValueError("snapshot iterations must be comma-separated integers") from error
+
+
+def _interval_for_target_count(iterations: int, *, target_count: int) -> int:
+    return max(1, (iterations + target_count - 1) // target_count)
+
+
+def _progress_reporter() -> Callable[[int, int], None]:
+    reported_percentage: int | None = None
+
+    def report(completed: int, total: int) -> None:
+        nonlocal reported_percentage
+        percentage = min(100, completed * 100 // total)
+        rounded_percentage = percentage // 5 * 5
+        if reported_percentage is None:
+            reported_percentage = rounded_percentage
+        elif rounded_percentage > reported_percentage:
+            reported_percentage = rounded_percentage
+            print(f"progress: {rounded_percentage}% ({completed}/{total} iterations)")
+
+    return report
+
+
+def _print_final_metrics(metrics_path: Path) -> None:
+    records = tuple(
+        record for record in TrainingMetricStore(metrics_path).records if record["exploitability"]
+    )
+    if not records:
+        return
+    final_record = max(records, key=lambda record: int(record["iteration"]))
+    print(
+        f"player-zero average-policy value: {float(final_record['expected_value_player_zero']):.12g}"
+    )
+    print(f"exploitability: {float(final_record['exploitability']):.12g}")
+    print(f"solver training time: {float(final_record['elapsed_training_seconds']):.6g} seconds")
+    print(f"average traversal throughput: {float(final_record['traversals_per_second']):.6g}/s")

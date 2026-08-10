@@ -12,7 +12,12 @@ from numpy.typing import NDArray
 from ac_cfr.games.tabular import TabularGame
 from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, tree_compatibility_digest
 from ac_cfr.persistence.files import atomic_binary_writer
-from ac_cfr.persistence.results import RESULT_FIELDS, RESULT_KEY_FIELDS, ResultRecord
+from ac_cfr.persistence.results import (
+    LEGACY_RESULT_FIELDS,
+    TRAINING_METRIC_FIELDS,
+    TRAINING_METRIC_KEY_FIELDS,
+    ResultRecord,
+)
 from ac_cfr.solvers.cfr import CFR
 from ac_cfr.solvers.naive_cfr import NaiveCFR
 
@@ -196,14 +201,17 @@ def _validate_metadata(metadata: object) -> None:
         raise ValueError("checkpoint metric_records is invalid")
     record_keys: set[tuple[str, ...]] = set()
     for record in records:
-        if not isinstance(record, dict) or set(record) != set(RESULT_FIELDS):
+        if not isinstance(record, dict) or set(record) not in (
+            set(TRAINING_METRIC_FIELDS),
+            set(LEGACY_RESULT_FIELDS),
+        ):
             raise ValueError("checkpoint contains an invalid metric record")
         if any(not isinstance(value, str) for value in record.values()):
             raise ValueError("checkpoint metric values must be strings")
         required_result_fields = ("game", "game_version", "solver", "run_id", "iteration", "seed")
         if any(not record[field] for field in required_result_fields):
             raise ValueError("checkpoint metric record is missing a required field")
-        record_key = tuple(record[field] for field in RESULT_KEY_FIELDS)
+        record_key = tuple(record[field] for field in TRAINING_METRIC_KEY_FIELDS)
         if record_key in record_keys:
             raise ValueError("checkpoint contains duplicate metric records")
         record_keys.add(record_key)

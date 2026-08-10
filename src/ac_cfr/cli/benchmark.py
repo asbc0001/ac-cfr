@@ -15,7 +15,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--game", choices=("kuhn", "leduc"), required=True)
     parser.add_argument("--solver", choices=SOLVER_IDS, required=True)
     parser.add_argument("--iterations", type=int, required=True)
-    parser.add_argument("--repeats", type=int, required=True)
+    parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--averaging-delay", type=int, default=0)
     arguments = parser.parse_args(argv)
     result = run_tabular_benchmark(

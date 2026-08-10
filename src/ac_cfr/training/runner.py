@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from math import isfinite
 from pathlib import Path
@@ -18,7 +19,7 @@ from ac_cfr.persistence.checkpoints import (
     validate_checkpoint_compatibility,
 )
 from ac_cfr.persistence.files import atomic_text_writer
-from ac_cfr.persistence.results import CsvResultStore
+from ac_cfr.persistence.results import TrainingMetricStore
 from ac_cfr.persistence.snapshots import export_tabular_snapshot
 from ac_cfr.solvers import CFR, CFRPlus, NaiveCFR, NaiveCFRPlus
 
@@ -141,16 +142,18 @@ def start_tabular_training(
     config: TabularTrainingConfig,
     *,
     runs_root: Path = Path("runs"),
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> TrainingOutcome:
     """Start a CFR or CFR+ training run."""
     run_directory = runs_root / config.run_id
     if run_directory.exists():
         raise FileExistsError(f"run directory already exists: {run_directory}")
     tabular_game = create_tabular_game(GameId(config.game))
+    _warm_up_optimised_solver(config, tabular_game)
     solver = _create_solver(config, tabular_game)
     code_revision = _code_revision()
     _write_run_config(run_directory / "run_config.json", config, code_revision)
-    result_store = CsvResultStore(run_directory / "metrics.csv")
+    result_store = TrainingMetricStore(run_directory / "metrics.csv")
     return _execute_schedule(
         config=config,
         tabular_game=tabular_game,
@@ -160,10 +163,15 @@ def start_tabular_training(
         elapsed_training_seconds=0.0,
         schedule_state=_ScheduleState(),
         code_revision=code_revision,
+        progress_callback=progress_callback,
     )
 
 
-def resume_tabular_training(checkpoint_path: Path) -> TrainingOutcome:
+def resume_tabular_training(
+    checkpoint_path: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> TrainingOutcome:
     """Resume a CFR or CFR+ run from a checkpoint."""
     checkpoint = load_tabular_checkpoint(checkpoint_path)
     config = TabularTrainingConfig.from_dict(checkpoint.metadata["training_config"])
@@ -173,7 +181,7 @@ def resume_tabular_training(checkpoint_path: Path) -> TrainingOutcome:
         raise ValueError("checkpoint run_id does not match its training configuration")
     run_directory = checkpoint_path.parent.parent
     _validate_run_config(run_directory / "run_config.json", config)
-    result_store = CsvResultStore(run_directory / "metrics.csv")
+    result_store = TrainingMetricStore(run_directory / "metrics.csv")
     elapsed_training_seconds = checkpoint.metadata["elapsed_training_seconds"]
     if (
         isinstance(elapsed_training_seconds, bool)
@@ -183,6 +191,7 @@ def resume_tabular_training(checkpoint_path: Path) -> TrainingOutcome:
     ):
         raise ValueError("checkpoint elapsed_training_seconds is invalid")
     schedule_state = _ScheduleState.from_dict(checkpoint.metadata["schedule_state"])
+    _warm_up_optimised_solver(config, tabular_game)
     solver = _create_solver(config, tabular_game)
     solver.restore_training_state(
         iteration=checkpoint.metadata["iteration"],
@@ -199,6 +208,7 @@ def resume_tabular_training(checkpoint_path: Path) -> TrainingOutcome:
         elapsed_training_seconds=float(elapsed_training_seconds),
         schedule_state=schedule_state,
         code_revision=_code_revision(),
+        progress_callback=progress_callback,
     )
 
 
@@ -208,16 +218,23 @@ def _execute_schedule(
     tabular_game: TabularGame,
     solver: NaiveCFR | CFR,
     run_directory: Path,
-    result_store: CsvResultStore,
+    result_store: TrainingMetricStore,
     elapsed_training_seconds: float,
     schedule_state: _ScheduleState,
     code_revision: str,
+    progress_callback: Callable[[int, int], None] | None,
 ) -> TrainingOutcome:
     if solver.iteration > config.iterations:
         raise ValueError("checkpoint iteration exceeds the configured training budget")
     snapshot_paths: list[Path] = []
     stopped_early = False
-    for milestone in _remaining_milestones(config, solver.iteration):
+    if progress_callback is not None:
+        progress_callback(solver.iteration, config.iterations)
+    for milestone in _remaining_milestones(
+        config,
+        solver.iteration,
+        include_progress=progress_callback is not None,
+    ):
         start_time = perf_counter()
         solver.train(milestone - solver.iteration)
         elapsed_training_seconds += perf_counter() - start_time
@@ -235,9 +252,15 @@ def _execute_schedule(
         if metrics is not None:
             stopped_early = _update_early_stopping(config, schedule_state, metrics.exploitability)
 
-        checkpoint_id = f"{config.run_id}_iter_{milestone}"
-        # Every measured policy is frozen first so evaluation records identify an exact artefact.
-        should_snapshot = metrics is not None or stopped_early
+        should_snapshot = (
+            milestone in config.snapshot_iterations
+            or milestone == config.iterations
+            or stopped_early
+        )
+        should_checkpoint = (
+            milestone % config.checkpoint_interval == 0 or should_snapshot or stopped_early
+        )
+        checkpoint_id = f"{config.run_id}_iter_{milestone}" if should_checkpoint else ""
         snapshot_id = f"{config.run_id}_iter_{milestone}" if should_snapshot else ""
         if should_snapshot:
             snapshot_path = run_directory / "strategy_snapshots" / f"{snapshot_id}.npz"
@@ -276,9 +299,6 @@ def _execute_schedule(
                 }
             )
 
-        should_checkpoint = (
-            milestone % config.checkpoint_interval == 0 or metrics is not None or stopped_early
-        )
         if should_checkpoint:
             _save_checkpoint_pair(
                 run_directory=run_directory,
@@ -291,6 +311,8 @@ def _execute_schedule(
                 result_store=result_store,
                 code_revision=code_revision,
             )
+        if progress_callback is not None:
+            progress_callback(solver.iteration, config.iterations)
         if stopped_early:
             break
 
@@ -317,7 +339,12 @@ def _execute_schedule(
     )
 
 
-def _remaining_milestones(config: TabularTrainingConfig, completed: int) -> tuple[int, ...]:
+def _remaining_milestones(
+    config: TabularTrainingConfig,
+    completed: int,
+    *,
+    include_progress: bool = False,
+) -> tuple[int, ...]:
     milestones = set(
         range(config.evaluation_interval, config.iterations + 1, config.evaluation_interval)
     )
@@ -325,6 +352,10 @@ def _remaining_milestones(config: TabularTrainingConfig, completed: int) -> tupl
         range(config.checkpoint_interval, config.iterations + 1, config.checkpoint_interval)
     )
     milestones.update(config.snapshot_iterations)
+    if include_progress:
+        milestones.update(
+            (config.iterations * percentage + 99) // 100 for percentage in range(5, 101, 5)
+        )
     milestones.add(config.iterations)
     return tuple(sorted(iteration for iteration in milestones if iteration > completed))
 
@@ -357,7 +388,7 @@ def _save_checkpoint_pair(
     elapsed_training_seconds: float,
     checkpoint_id: str,
     schedule_state: _ScheduleState,
-    result_store: CsvResultStore,
+    result_store: TrainingMetricStore,
     code_revision: str,
 ) -> None:
     checkpoint_directory = run_directory / "checkpoints"
@@ -389,6 +420,11 @@ def _create_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> 
     if config.solver == "cfr":
         return CFR(tabular_game.tree)
     return CFRPlus(tabular_game.tree, averaging_delay=config.averaging_delay)
+
+
+def _warm_up_optimised_solver(config: TabularTrainingConfig, tabular_game: TabularGame) -> None:
+    if config.solver in ("cfr", "cfr_plus"):
+        _create_solver(config, tabular_game).train(1)
 
 
 def _write_run_config(path: Path, config: TabularTrainingConfig, code_revision: str) -> None:

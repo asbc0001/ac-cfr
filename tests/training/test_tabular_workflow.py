@@ -8,13 +8,15 @@ import pytest
 from ac_cfr.agents import TabularAgent
 from ac_cfr.benchmarking import run_tabular_benchmark
 from ac_cfr.cli.evaluate import main as evaluate_main
-from ac_cfr.evaluation.plotting import plot_exact_metric
+from ac_cfr.cli.plot_results import main as plot_main
+from ac_cfr.cli.train import main as train_main
 from ac_cfr.games.base import GameId
 from ac_cfr.games.kuhn import KuhnConfig, KuhnGame
 from ac_cfr.games.tabular import create_tabular_game
 from ac_cfr.persistence.checkpoints import load_tabular_checkpoint
 from ac_cfr.persistence.files import atomic_binary_writer
 from ac_cfr.persistence.registry import load_strategy_registry
+from ac_cfr.persistence.results import EVALUATION_RESULT_FIELDS, TRAINING_METRIC_FIELDS
 from ac_cfr.persistence.snapshots import (
     SNAPSHOT_SCHEMA_VERSION,
     export_tabular_snapshot,
@@ -140,12 +142,11 @@ def test_snapshot_registry_loads_tabular_agent_and_rejects_tampering(tmp_path: P
 
 
 def test_evaluation_results_plot_and_benchmark_foundations(tmp_path: Path) -> None:
-    results_path = tmp_path / "kuhn.csv"
+    results_path = tmp_path / "evaluation" / "metrics.csv"
     arguments = (
+        "kuhn_random",
         "--strategy-registry",
         "configs/strategy_registry.json",
-        "--strategy-id",
-        "kuhn_random",
         "--results",
         str(results_path),
         "--project-root",
@@ -154,10 +155,12 @@ def test_evaluation_results_plot_and_benchmark_foundations(tmp_path: Path) -> No
     assert evaluate_main(arguments) == 0
     assert evaluate_main(arguments) == 0
     with results_path.open(encoding="utf-8", newline="") as results_file:
-        assert len(list(csv.DictReader(results_file))) == 1
+        reader = csv.DictReader(results_file)
+        assert tuple(reader.fieldnames or ()) == EVALUATION_RESULT_FIELDS
+        assert len(list(reader)) == 1
 
-    plot_path = tmp_path / "kuhn.png"
-    plot_exact_metric((results_path,), plot_path, metric="exploitability", x_axis="iteration")
+    plot_path = results_path.parent / "plots" / "exploitability_by_iteration.png"
+    assert plot_main((str(results_path.parent), "--metric", "exploitability")) == 0
     assert plot_path.stat().st_size > 0
 
     benchmark = run_tabular_benchmark(
@@ -168,6 +171,48 @@ def test_evaluation_results_plot_and_benchmark_foundations(tmp_path: Path) -> No
     )
     assert benchmark.traversals == 4
     assert benchmark.median_seconds > 0.0
+
+
+def test_training_command_uses_useful_output_defaults(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_id = "cli_defaults"
+    assert (
+        train_main(
+            (
+                "--game",
+                "kuhn",
+                "--solver",
+                "cfr",
+                "--iterations",
+                "200",
+                "--run-id",
+                run_id,
+                "--runs-root",
+                str(tmp_path),
+                "--plot",
+            )
+        )
+        == 0
+    )
+    terminal_output = capsys.readouterr().out
+    assert "progress: 5% (10/200 iterations)" in terminal_output
+    assert "progress: 100% (200/200 iterations)" in terminal_output
+
+    run_directory = tmp_path / run_id
+    run_config = json.loads((run_directory / "run_config.json").read_text(encoding="utf-8"))
+    training_config = run_config["training_config"]
+    assert training_config["evaluation_interval"] == 2
+    assert training_config["checkpoint_interval"] == 20
+
+    with (run_directory / "metrics.csv").open(encoding="utf-8", newline="") as metrics_file:
+        reader = csv.DictReader(metrics_file)
+        assert tuple(reader.fieldnames or ()) == TRAINING_METRIC_FIELDS
+        assert len(list(reader)) == 100
+    assert len(tuple((run_directory / "strategy_snapshots").glob("*.npz"))) == 1
+    assert len(tuple((run_directory / "checkpoints").glob("*.npz"))) == 11
+    assert (run_directory / "plots" / "training_diagnostics.png").stat().st_size > 0
 
 
 def _registry_for_snapshot(snapshot_path: Path, game_id: GameId) -> dict[str, object]:

@@ -7,15 +7,19 @@ from pathlib import Path
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import UtilityUnit
 from ac_cfr.persistence.registry import load_strategy_registry
-from ac_cfr.persistence.results import CsvResultStore
+from ac_cfr.persistence.results import EvaluationResultStore
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Resolve one trusted strategy, evaluate it exactly, and upsert its result."""
     parser = argparse.ArgumentParser(description="Evaluate a registered Kuhn or Leduc strategy.")
-    parser.add_argument("--strategy-registry", type=Path, required=True)
-    parser.add_argument("--strategy-id", required=True)
-    parser.add_argument("--results", type=Path, required=True)
+    parser.add_argument("strategy_id")
+    parser.add_argument(
+        "--strategy-registry",
+        type=Path,
+        default=Path("configs/strategy_registry.json"),
+    )
+    parser.add_argument("--results", type=Path, default=Path("results/evaluations.csv"))
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     arguments = parser.parse_args(argv)
 
@@ -27,7 +31,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     metrics = evaluate_strategy(resolved.tabular_game.tree, resolved.policy)
     entry = resolved.entry
     snapshot_metadata = resolved.snapshot_metadata
-    CsvResultStore(arguments.results).upsert(
+    EvaluationResultStore(arguments.results).upsert(
         {
             "game": entry.game,
             "game_version": entry.game_version,
