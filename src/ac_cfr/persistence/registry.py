@@ -10,10 +10,18 @@ from numpy.typing import NDArray
 
 from ac_cfr.agents.base import PlayableAgent
 from ac_cfr.agents.baselines import BaselineAgent
+from ac_cfr.agents.neural import NeuralAgent
 from ac_cfr.agents.tabular import TabularAgent
+from ac_cfr.common.config import ModelConfigId, StateEncodingId
 from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import TabularGame, create_tabular_game
 from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, TABULAR_MODEL_CONFIG_ID
+from ac_cfr.persistence.deep_cfr_snapshots import (
+    DEEP_CFR_SNAPSHOT_SCHEMA_VERSION,
+    DeepCFRSnapshotMetadata,
+    deep_cfr_policy,
+    load_deep_cfr_snapshot,
+)
 from ac_cfr.persistence.snapshots import (
     SNAPSHOT_SCHEMA_VERSION,
     TabularSnapshotMetadata,
@@ -57,7 +65,7 @@ class ResolvedStrategy:
     tabular_game: TabularGame
     agent: PlayableAgent
     policy: NDArray[np.float64]
-    snapshot_metadata: TabularSnapshotMetadata | None
+    snapshot_metadata: TabularSnapshotMetadata | DeepCFRSnapshotMetadata | None
 
 
 class StrategyRegistry:
@@ -79,7 +87,7 @@ class StrategyRegistry:
         return tuple(self._entries.values())
 
     def resolve(self, strategy_id: str) -> ResolvedStrategy:
-        """Validate and load one named baseline or tabular strategy."""
+        """Validate and load one named baseline, tabular, or neural strategy."""
         try:
             entry = self._entries[strategy_id]
         except KeyError as error:
@@ -87,38 +95,39 @@ class StrategyRegistry:
         tabular_game = create_tabular_game(GameId(entry.game))
         if entry.game_version != tabular_game.configuration_id.value:
             raise ValueError("registry entry has an incompatible game_version")
-        if entry.state_encoding != tabular_game.state_encoding_id.value:
-            raise ValueError("registry entry has an incompatible state_encoding")
         if entry.action_space != ACTION_SPACE_ID:
             raise ValueError("registry entry has an incompatible action_space")
 
         if entry.agent_type == "baseline":
+            _require_state_encoding(entry, tabular_game.state_encoding_id.value)
             policy = _uniform_policy(tabular_game)
             policy.setflags(write=False)
             return ResolvedStrategy(entry, tabular_game, BaselineAgent(), policy, None)
-        if entry.agent_type != "tabular":
-            raise ValueError(f"unsupported agent_type: {entry.agent_type}")
-
         path = self._resolve_file_path(entry)
-        snapshot = load_tabular_snapshot(path, tabular_game)
-        expected_metadata = {
-            "snapshot_id": entry.snapshot_id,
-            "solver": entry.algorithm,
-            "training_iteration": entry.training_iteration,
-            "model_config_id": entry.model_config_id,
-            "tree_digest": entry.tree_digest,
-            "artifact_schema_version": entry.artifact_schema_version,
-        }
-        for field_name, expected_value in expected_metadata.items():
-            if getattr(snapshot.metadata, field_name) != expected_value:
-                raise ValueError(f"snapshot does not match registry {field_name}")
-        return ResolvedStrategy(
-            entry,
-            tabular_game,
-            TabularAgent(tabular_game, snapshot),
-            snapshot.average_policy,
-            snapshot.metadata,
-        )
+        if entry.agent_type == "tabular":
+            _require_state_encoding(entry, tabular_game.state_encoding_id.value)
+            snapshot = load_tabular_snapshot(path, tabular_game)
+            _require_snapshot_metadata(entry, snapshot.metadata)
+            return ResolvedStrategy(
+                entry,
+                tabular_game,
+                TabularAgent(tabular_game, snapshot),
+                snapshot.average_policy,
+                snapshot.metadata,
+            )
+        if entry.agent_type == "neural":
+            snapshot = load_deep_cfr_snapshot(path, tabular_game.tree)
+            _require_snapshot_metadata(entry, snapshot.metadata)
+            if snapshot.metadata.solver != "optimised":
+                raise ValueError("registered neural strategy must use the optimised solver")
+            return ResolvedStrategy(
+                entry,
+                tabular_game,
+                NeuralAgent(snapshot),
+                deep_cfr_policy(tabular_game.tree, snapshot.network),
+                snapshot.metadata,
+            )
+        raise ValueError(f"unsupported agent_type: {entry.agent_type}")
 
     def _resolve_file_path(self, entry: StrategyRegistryEntry) -> Path:
         """Resolve and integrity-check a registry-owned artefact path."""
@@ -182,7 +191,7 @@ def _parse_entry(raw_entry: object) -> StrategyRegistryEntry:
 
 
 def _validate_entry(entry: StrategyRegistryEntry) -> None:
-    """Validate common, baseline-specific, and tabular entry invariants."""
+    """Validate common and agent-specific registry invariants."""
     string_fields = (
         entry.strategy_id,
         entry.label,
@@ -201,7 +210,7 @@ def _validate_entry(entry: StrategyRegistryEntry) -> None:
     except ValueError as error:
         raise ValueError("strategy entry game is unknown") from error
     if game_id not in (GameId.KUHN, GameId.LEDUC):
-        raise ValueError("strategy entry game does not support tabular policies")
+        raise ValueError("strategy entry game is unsupported")
     if isinstance(entry.training_iteration, bool) or not isinstance(entry.training_iteration, int):
         raise ValueError("strategy entry training_iteration must be an integer")
     if entry.training_iteration < 0 or not isinstance(entry.evaluation, dict):
@@ -220,10 +229,19 @@ def _validate_entry(entry: StrategyRegistryEntry) -> None:
         if any(value is not None for value in optional_values):
             raise ValueError("baseline entries must not reference a strategy file")
         return
-    if entry.agent_type != "tabular":
+    if entry.agent_type not in {"tabular", "neural"}:
         raise ValueError("strategy entry agent_type is unsupported")
-    if entry.model_config_id != TABULAR_MODEL_CONFIG_ID:
+    if entry.agent_type == "tabular" and entry.model_config_id != TABULAR_MODEL_CONFIG_ID:
         raise ValueError("tabular strategy entry model_config_id is incompatible")
+    if entry.agent_type == "neural":
+        if game_id is not GameId.LEDUC or entry.algorithm != "deep_cfr":
+            raise ValueError("neural strategy entry must describe Leduc Deep CFR")
+        try:
+            ModelConfigId(entry.model_config_id)
+        except ValueError as error:
+            raise ValueError("neural strategy model_config_id is incompatible") from error
+        if entry.state_encoding != StateEncodingId.LEDUC_NEURAL.value:
+            raise ValueError("neural strategy state_encoding is incompatible")
     required_strings = (
         entry.snapshot_id,
         entry.local_path,
@@ -232,19 +250,45 @@ def _validate_entry(entry: StrategyRegistryEntry) -> None:
         entry.sha256,
     )
     if any(not isinstance(value, str) or not value for value in required_strings):
-        raise ValueError("tabular strategy entry file metadata is incomplete")
-    if (
-        isinstance(entry.artifact_schema_version, bool)
-        or entry.artifact_schema_version != SNAPSHOT_SCHEMA_VERSION
+        raise ValueError("strategy entry file metadata is incomplete")
+    if isinstance(entry.artifact_schema_version, bool) or entry.artifact_schema_version != (
+        SNAPSHOT_SCHEMA_VERSION
+        if entry.agent_type == "tabular"
+        else DEEP_CFR_SNAPSHOT_SCHEMA_VERSION
     ):
-        raise ValueError("tabular strategy entry artifact schema is incompatible")
+        raise ValueError("strategy entry artifact schema is incompatible")
     if isinstance(entry.file_size, bool) or not isinstance(entry.file_size, int):
         raise ValueError("tabular strategy entry file_size must be an integer")
     if entry.file_size <= 0 or _SHA256_PATTERN.fullmatch(entry.sha256 or "") is None:
-        raise ValueError("tabular strategy entry file integrity metadata is invalid")
+        raise ValueError("strategy entry file integrity metadata is invalid")
     assert entry.local_path is not None
     if PurePosixPath(entry.local_path).parts[:1] != ("artifacts",):
-        raise ValueError("tabular strategy files must be located under artifacts")
+        raise ValueError("strategy files must be located under artifacts")
+
+
+def _require_state_encoding(entry: StrategyRegistryEntry, expected: str) -> None:
+    """Require one registry entry to use the expected game-state encoding."""
+    if entry.state_encoding != expected:
+        raise ValueError("registry entry has an incompatible state_encoding")
+
+
+def _require_snapshot_metadata(
+    entry: StrategyRegistryEntry,
+    metadata: TabularSnapshotMetadata | DeepCFRSnapshotMetadata,
+) -> None:
+    """Require loaded snapshot metadata to match its registry entry."""
+    expected_metadata = {
+        "snapshot_id": entry.snapshot_id,
+        "training_iteration": entry.training_iteration,
+        "model_config_id": entry.model_config_id,
+        "tree_digest": entry.tree_digest,
+        "artifact_schema_version": entry.artifact_schema_version,
+    }
+    if entry.agent_type == "tabular":
+        expected_metadata["solver"] = entry.algorithm
+    for field_name, expected_value in expected_metadata.items():
+        if getattr(metadata, field_name) != expected_value:
+            raise ValueError(f"snapshot does not match registry {field_name}")
 
 
 def _uniform_policy(tabular_game: TabularGame) -> NDArray[np.float64]:

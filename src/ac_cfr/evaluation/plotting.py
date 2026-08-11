@@ -386,6 +386,111 @@ def plot_deep_cfr_sensitivity(result_path: Path, output_path: Path) -> None:
     _save_figure(figure, output_path)
 
 
+def plot_selected_deep_cfr_validation(
+    result_path: Path,
+    output_path: Path,
+    *,
+    main_seed: int,
+) -> None:
+    """Plot multi-seed quality and moderate-run neural-training diagnostics."""
+    records = _read_records(
+        result_path,
+        {
+            "seed",
+            "iteration",
+            "elapsed_training_seconds",
+            "exploitability",
+            "player_zero_advantage_training_loss",
+            "player_zero_advantage_validation_loss",
+            "player_one_advantage_training_loss",
+            "player_one_advantage_validation_loss",
+            "strategy_training_loss",
+            "strategy_validation_loss",
+        },
+    )
+    seeds = sorted({int(record["seed"]) for record in records})
+    if main_seed not in seeds or len(seeds) != 3:
+        raise ValueError(
+            "selected Deep CFR validation requires three seeds including the main seed"
+        )
+    main_records = sorted(
+        (record for record in records if int(record["seed"]) == main_seed),
+        key=lambda record: int(record["iteration"]),
+    )
+
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(12, 8))
+    quality_axis, time_axis, advantage_axis, strategy_axis = figure.subplots(2, 2).flat
+    for seed in seeds:
+        seed_records = sorted(
+            (record for record in records if int(record["seed"]) == seed),
+            key=lambda record: int(record["iteration"]),
+        )
+        quality_axis.plot(
+            [int(record["iteration"]) for record in seed_records],
+            [float(record["exploitability"]) for record in seed_records],
+            marker="o",
+            label=f"Seed {seed}" + (" (moderate)" if seed == main_seed else ""),
+        )
+    quality_axis.set_xlabel("Deep CFR outer iterations")
+    quality_axis.set_ylabel("Exact exploitability (chips)")
+    quality_axis.legend()
+
+    time_axis.plot(
+        [float(record["elapsed_training_seconds"]) for record in main_records],
+        [float(record["exploitability"]) for record in main_records],
+        marker="o",
+    )
+    time_axis.set_xlabel("Moderate-run training time (seconds)")
+    time_axis.set_ylabel("Exact exploitability (chips)")
+
+    iterations = [int(record["iteration"]) for record in main_records]
+    advantage_training = [
+        (
+            float(record["player_zero_advantage_training_loss"])
+            + float(record["player_one_advantage_training_loss"])
+        )
+        / 2.0
+        for record in main_records
+    ]
+    advantage_validation = [
+        (
+            float(record["player_zero_advantage_validation_loss"])
+            + float(record["player_one_advantage_validation_loss"])
+        )
+        / 2.0
+        for record in main_records
+    ]
+    advantage_axis.plot(iterations, advantage_training, marker="o", label="Training")
+    advantage_axis.plot(iterations, advantage_validation, marker="o", label="Held-out")
+    advantage_axis.set_xlabel("Deep CFR outer iterations")
+    advantage_axis.set_ylabel("Mean advantage-network loss")
+    advantage_axis.legend()
+
+    strategy_axis.plot(
+        iterations,
+        [float(record["strategy_training_loss"]) for record in main_records],
+        marker="o",
+        label="Training",
+    )
+    strategy_axis.plot(
+        iterations,
+        [float(record["strategy_validation_loss"]) for record in main_records],
+        marker="o",
+        label="Held-out",
+    )
+    strategy_axis.set_xlabel("Deep CFR outer iterations")
+    strategy_axis.set_ylabel("Average-strategy network loss")
+    strategy_axis.legend()
+
+    for axis in (quality_axis, time_axis, advantage_axis, strategy_axis):
+        axis.grid(alpha=0.25)
+    figure.suptitle("Selected optimised Deep CFR validation on Leduc")
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    _save_figure(figure, output_path)
+
+
 def plot_mccfr_validation(
     convergence_path: Path,
     summary_path: Path,

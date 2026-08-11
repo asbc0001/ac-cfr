@@ -118,3 +118,4 @@ def test_deep_cfr_sensitivity_cases_change_one_declared_factor() -> None:
         run_id="selected_test",
     )
     assert selected.training.iterations == 100
+    assert selected.training.advantage_training_steps == 200

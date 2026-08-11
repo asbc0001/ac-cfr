@@ -43,7 +43,7 @@
         "game": {"enum": ["kuhn", "leduc"]},
         "game_version": {"type": "string", "minLength": 1},
         "algorithm": {"type": "string", "minLength": 1},
-        "agent_type": {"enum": ["baseline", "tabular"]},
+        "agent_type": {"enum": ["baseline", "tabular", "neural"]},
         "snapshot_id": {"$ref": "#/$defs/nullableString"},
         "training_iteration": {"type": "integer", "minimum": 0},
         "local_path": {"$ref": "#/$defs/nullableString"},
@@ -78,6 +78,23 @@
             "properties": {
               "snapshot_id": {"type": "string", "minLength": 1},
               "local_path": {"type": "string", "pattern": "^artifacts/.+"},
+              "tree_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "artifact_schema_version": {"const": 1},
+              "release_id": {"type": "string", "minLength": 1},
+              "file_size": {"type": "integer", "minimum": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"agent_type": {"const": "neural"}}},
+          "then": {
+            "properties": {
+              "game": {"const": "leduc"},
+              "algorithm": {"const": "deep_cfr"},
+              "snapshot_id": {"type": "string", "minLength": 1},
+              "local_path": {"type": "string", "pattern": "^artifacts/.+"},
+              "state_encoding": {"const": "leduc_neural"},
               "tree_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
               "artifact_schema_version": {"const": 1},
               "release_id": {"type": "string", "minLength": 1},

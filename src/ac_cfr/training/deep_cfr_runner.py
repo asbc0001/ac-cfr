@@ -407,7 +407,7 @@ def _write_summary(outcome: DeepCFRTrainingOutcome, store: DeepCFRMetricStore) -
     lines = (
         f"Run: {record['run_id']}",
         "Game: Leduc",
-        "Solver: Deep CFR (reference)",
+        f"Solver: Deep CFR ({record['solver']})",
         f"Iterations: {int(record['iteration']):,}",
         f"Traversals: {int(record['traversals']):,}",
         f"Player 0 average-policy value: {float(record['expected_value_player_zero']):.12g} chips",
