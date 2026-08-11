@@ -1,0 +1,23 @@
+{
+  "about": "Single-process Leduc traversal-throughput sanity check for the validated optimised Deep CFR pipeline.",
+  "worker_processes": 1,
+  "aggregate_equals_per_process": true,
+  "fixed_benchmark": {
+    "source": "benchmark_summary.csv",
+    "code_revision": "fa8e43daf0ee84bfa42e16955eb9c713524db4e8",
+    "repeats": 3,
+    "traversals_per_repeat": 10000,
+    "median_collection_seconds": 1.2503798880206887,
+    "aggregate_traversals_per_second": 7997.569455335434,
+    "per_process_traversals_per_second": 7997.569455335434,
+    "median_absolute_deviation_traversals_per_second": 737.1535446193238
+  },
+  "final_run": {
+    "source": "final_policy_convergence.csv",
+    "code_revision": "af079e3cc360be130b7ee5824ddcef8b5ddf9e4a",
+    "traversals": 400000,
+    "training_seconds": 770.1558473629702,
+    "end_to_end_traversals_per_second": 519.3753983295827
+  },
+  "boundary": "The validated Leduc trainer uses one worker process. No unsupported multi-process scaling or linear core extrapolation is claimed; modified-HULHE worker scaling requires its own representative calibration."
+}

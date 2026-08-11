@@ -66,6 +66,7 @@ def plot_deep_cfr_training_diagnostics(result_path: Path, output_path: Path) -> 
     records = _read_records(
         result_path,
         {
+            "solver",
             "iteration",
             "elapsed_training_seconds",
             "exploitability",
@@ -101,15 +102,34 @@ def plot_deep_cfr_training_diagnostics(result_path: Path, output_path: Path) -> 
     for field, label in (
         ("player_zero_advantage_validation_loss", "Player 0 advantage validation"),
         ("player_one_advantage_validation_loss", "Player 1 advantage validation"),
-        ("strategy_validation_loss", "Average-strategy validation"),
     ):
         values = [float(record[field]) for record in records if record[field]]
         x_values = [int(record["iteration"]) for record in records if record[field]]
         if values:
             loss_axis.plot(x_values, values, marker="o", label=label)
     loss_axis.set_xlabel("Deep CFR outer iterations")
-    loss_axis.set_ylabel("Held-out loss")
-    loss_axis.legend()
+    loss_axis.set_ylabel("Advantage held-out loss")
+
+    strategy_loss_axis = loss_axis.twinx()
+    strategy_values = [
+        float(record["strategy_validation_loss"])
+        for record in records
+        if record["strategy_validation_loss"]
+    ]
+    strategy_iterations = [
+        int(record["iteration"]) for record in records if record["strategy_validation_loss"]
+    ]
+    if strategy_values:
+        strategy_loss_axis.plot(
+            strategy_iterations,
+            strategy_values,
+            color="tab:green",
+            marker="o",
+            label="Average-strategy validation",
+        )
+    strategy_loss_axis.set_ylabel("Average-strategy held-out loss")
+    lines = (*loss_axis.lines, *strategy_loss_axis.lines)
+    loss_axis.legend(lines, [line.get_label() for line in lines])
 
     throughput_axis.plot(
         iterations,
@@ -120,7 +140,8 @@ def plot_deep_cfr_training_diagnostics(result_path: Path, output_path: Path) -> 
     throughput_axis.set_ylabel("Average sampled traversals / second")
     for axis in (iteration_axis, time_axis, loss_axis, throughput_axis):
         axis.grid(alpha=0.25)
-    figure.suptitle("Reference Deep CFR training on Leduc")
+    implementation = records[0]["solver"].capitalize()
+    figure.suptitle(f"{implementation} Deep CFR training on Leduc")
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
     _save_figure(figure, output_path)
 

@@ -1,0 +1,43 @@
+{
+  "code_revision": "af079e3cc360be130b7ee5824ddcef8b5ddf9e4a",
+  "configuration": "configs/deep_cfr/leduc_final.toml",
+  "run_id": "leduc-deep-cfr-final-a1000-seed-20260811",
+  "completed_iterations": 200,
+  "total_traversals": 400000,
+  "training_seconds": 770.1558473629702,
+  "selection_metric": "exact_exploitability",
+  "curated_snapshots": [
+    {
+      "label": "early",
+      "strategy_id": "leduc_deep_cfr_early",
+      "iteration": 20,
+      "exploitability": 0.4003436830697676
+    },
+    {
+      "label": "intermediate",
+      "strategy_id": "leduc_deep_cfr_intermediate",
+      "iteration": 75,
+      "exploitability": 0.213083279657855
+    },
+    {
+      "label": "final",
+      "strategy_id": "leduc_deep_cfr_final",
+      "iteration": 150,
+      "exploitability": 0.2056493182762832
+    }
+  ],
+  "selected_snapshot": {
+    "snapshot_id": "leduc-deep-cfr-final-a1000-seed-20260811_iter_150",
+    "iteration": 150,
+    "expected_value_player_zero": -0.13028218397448363,
+    "exploitability": 0.2056493182762832,
+    "nash_conv": 0.4112986365525664,
+    "artifact_path": "artifacts/deep_cfr/leduc-deep-cfr-final.pt",
+    "file_size": 47565,
+    "sha256": "836120f2f951f45af0a4ab53f9517889b68a040ba2544fa90ed2b066aae8f58a"
+  },
+  "final_checkpoint": {
+    "iteration": 200,
+    "path": "runs/leduc-deep-cfr-final-a1000-seed-20260811/checkpoints/latest.pt"
+  }
+}

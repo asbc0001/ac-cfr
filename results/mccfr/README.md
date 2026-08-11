@@ -1,5 +1,7 @@
 # MCCFR validation and implementation benchmark on Leduc
 
+This directory records the correctness, convergence, profiling, final-policy, and fixed-workload benchmark evidence for reference and optimised MCCFR.
+
 **Status: PASS**
 
 ## Scope

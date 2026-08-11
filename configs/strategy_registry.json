@@ -170,6 +170,84 @@
       "release_id": "local-tabular-final",
       "file_size": 14810,
       "sha256": "5086c0b8905c80a200ca520d031b2543d66b5ba9a766877f0ee79ab270e9b03d"
+    },
+    {
+      "strategy_id": "leduc_deep_cfr_early",
+      "label": "Deep CFR early",
+      "game": "leduc",
+      "game_version": "leduc",
+      "algorithm": "deep_cfr",
+      "agent_type": "neural",
+      "snapshot_id": "leduc-deep-cfr-final-a1000-seed-20260811_iter_20",
+      "training_iteration": 20,
+      "local_path": "artifacts/deep_cfr/leduc-deep-cfr-early.pt",
+      "evaluation": {
+        "method": "exact_best_response",
+        "utility_unit": "chip",
+        "expected_value_player_zero": -0.127095192769385,
+        "exploitability": 0.4003436830697676,
+        "nash_conv": 0.8006873661395352
+      },
+      "model_config_id": "leduc_deep_cfr",
+      "state_encoding": "leduc_neural",
+      "action_space": "poker",
+      "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
+      "artifact_schema_version": 1,
+      "release_id": "local-deep-cfr-final",
+      "file_size": 47565,
+      "sha256": "9428a5350ddbc32937382282ec6e8e51e2652688d11304a8a73d46f23457fc68"
+    },
+    {
+      "strategy_id": "leduc_deep_cfr_intermediate",
+      "label": "Deep CFR intermediate",
+      "game": "leduc",
+      "game_version": "leduc",
+      "algorithm": "deep_cfr",
+      "agent_type": "neural",
+      "snapshot_id": "leduc-deep-cfr-final-a1000-seed-20260811_iter_75",
+      "training_iteration": 75,
+      "local_path": "artifacts/deep_cfr/leduc-deep-cfr-intermediate.pt",
+      "evaluation": {
+        "method": "exact_best_response",
+        "utility_unit": "chip",
+        "expected_value_player_zero": -0.11718946052226537,
+        "exploitability": 0.213083279657855,
+        "nash_conv": 0.42616655931571
+      },
+      "model_config_id": "leduc_deep_cfr",
+      "state_encoding": "leduc_neural",
+      "action_space": "poker",
+      "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
+      "artifact_schema_version": 1,
+      "release_id": "local-deep-cfr-final",
+      "file_size": 47565,
+      "sha256": "9bd14f886d8b5a1d54efb3072ac3f04fe58363841dede493b583964ac7721d25"
+    },
+    {
+      "strategy_id": "leduc_deep_cfr_final",
+      "label": "Deep CFR final",
+      "game": "leduc",
+      "game_version": "leduc",
+      "algorithm": "deep_cfr",
+      "agent_type": "neural",
+      "snapshot_id": "leduc-deep-cfr-final-a1000-seed-20260811_iter_150",
+      "training_iteration": 150,
+      "local_path": "artifacts/deep_cfr/leduc-deep-cfr-final.pt",
+      "evaluation": {
+        "method": "exact_best_response",
+        "utility_unit": "chip",
+        "expected_value_player_zero": -0.13028218397448363,
+        "exploitability": 0.2056493182762832,
+        "nash_conv": 0.4112986365525664
+      },
+      "model_config_id": "leduc_deep_cfr",
+      "state_encoding": "leduc_neural",
+      "action_space": "poker",
+      "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
+      "artifact_schema_version": 1,
+      "release_id": "local-deep-cfr-final",
+      "file_size": 47565,
+      "sha256": "836120f2f951f45af0a4ab53f9517889b68a040ba2544fa90ed2b066aae8f58a"
     }
   ]
 }

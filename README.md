@@ -74,9 +74,10 @@ Optimised MCCFR completed its fixed workload in `1.248` seconds, compared with `
 
 Detailed configurations, full-precision tables, plots, raw repetitions, memory results, and profiler output are available in:
 
-- [CFR/CFR+ correctness and performance results](results/cfr_cfr_plus/report.md)
-- [MCCFR validation and performance results](results/mccfr/report.md)
-- [Final tabular policy results](results/tabular_policies/report.md)
+- [CFR/CFR+ correctness and performance results](results/cfr_cfr_plus/README.md)
+- [MCCFR validation and performance results](results/mccfr/README.md)
+- [Deep CFR validation, performance, and final-policy results](results/deep_cfr/README.md)
+- [Final tabular policy results](results/tabular_policies/README.md)
 
 ## Training and policy artefacts
 

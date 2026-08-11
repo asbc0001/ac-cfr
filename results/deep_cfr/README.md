@@ -1,14 +1,18 @@
 # Deep CFR on Leduc
 
+This directory records the correctness, configuration, convergence, profiling, benchmark, and final-policy evidence for reference and optimised Deep CFR.
+
 - **Reference learning validation:** PASS
 - **Matched implementation convergence:** PASS
 - **Implementation profiling and benchmark:** COMPLETE
 - **Bounded configuration selection:** COMPLETE
 - **Training lifecycle validation:** PASS
+- **Final Leduc policy:** COMPLETE
+- **Leduc lifecycle gate:** PASS
 
 ## Scope
 
-These results validate Deep CFR learning, compare the reference and optimised implementations, and select a bounded Leduc configuration for final-policy training.
+These results validate Deep CFR learning, compare the reference and optimised implementations, select a bounded Leduc configuration, and produce the final playable policy.
 
 Training uses fixed minibatch-update budgets sampled uniformly from the reservoirs, so neural-training cost does not grow automatically with reservoir size.
 
@@ -85,7 +89,27 @@ Two independent 20-iteration checks confirmed the revised configuration learns c
 | 20260810 | 4.0035 | 0.3775 | 74.60 s |
 | 20260812 | 1.6933 | 0.4401 | 77.27 s |
 
-All recorded losses were finite, and final training and held-out losses remained comparable. A separate 150-iteration diagnostic reached 0.2295 exact exploitability; its weighted strategy reservoir reached 0.1910. Doubling the hidden-layer width did not improve the exported strategy, so the final preset retains the leaner 64-unit architecture. These checks select a reasonable configuration; they are not the final policy run.
+All recorded losses were finite, and final training and held-out losses remained comparable. A separate 150-iteration diagnostic reached 0.2295 exact exploitability; its weighted strategy reservoir reached 0.1910. Doubling the hidden-layer width did not improve the exported strategy, so the final preset retains the leaner 64-unit architecture. These checks selected the configuration used for the final run below.
+
+## Final Leduc policy
+
+The final optimised run completed 200 outer iterations and 400,000 sampled traversals in 770.16 seconds. Exact evaluation was limited to the declared snapshot milestones:
+
+| Iteration | Training time | Exact exploitability |
+|---:|---:|---:|
+| 1 | 6.56 s | 3.6753 |
+| 20 | 82.05 s | 0.4003 |
+| 50 | 192.69 s | 0.2559 |
+| 75 | 285.66 s | 0.2131 |
+| 100 | 387.22 s | 0.3752 |
+| 125 | 486.21 s | 0.3108 |
+| 150 | 579.82 s | **0.2056** |
+| 175 | 671.45 s | 0.2801 |
+| 200 | 770.16 s | 0.2503 |
+
+Iteration 150 had the lowest measured exploitability and was therefore selected instead of automatically using the last snapshot. Its exact Player 0 value is `-0.130282` chips per hand and its NashConv is `0.411299` chips. `NeuralAgent` reproduced its policy probabilities across all 936 Leduc information sets within `1e-6`.
+
+The selected snapshot is staged at `artifacts/deep_cfr/leduc-deep-cfr-final.pt` and registered as `leduc_deep_cfr_final`. Iterations 20 and 75 are also registered as the curated early and intermediate policies. The iteration-200 checkpoint remains available under the ignored run directory for compatible resume. This run used source revision `af079e3cc360be130b7ee5824ddcef8b5ddf9e4a`.
 
 ## Engineering results
 
@@ -100,6 +124,8 @@ The fixed benchmark gives each implementation 10,000 traversals and 100 optimize
 
 This is a `6.55x` training speedup, `7.29x` higher traversal throughput and `15.4%` lower peak memory for the declared CPU workload. MAD measures typical timing variation around the median. PSS measures process memory without fully double-counting shared pages.
 
+The validated Leduc trainer uses one worker process. Its three-repeat fixed benchmark collected a median `7,997.6` traversals/second, so aggregate and per-process throughput are identical. The final end-to-end run averaged `519.4` traversals/second once neural training and snapshot work were included. These measurements are a preliminary counter and harness sanity check, not a claim that throughput scales linearly with more processes; modified HULHE requires its own representative calibration.
+
 Profiling supports the timing result: batching reduces network calls from 30,315 to 365, packed handling reduces Python-visible calls from 19.3 million to 1.5 million, and optimised traversal uses about 0.6 profiled seconds versus 6.3 seconds for recursive reference traversal. Profiled times themselves are diagnostic because instrumentation changes execution speed.
 
 ## Reproducibility
@@ -113,5 +139,8 @@ Reference runs exported independently loadable policies at iterations 1, 5 and 1
 - `configuration_study.json`, `configuration_study.csv`, and `plots/configuration_sensitivity.png` contain the bounded configuration study.
 - `selected_validation.json`, `selected_convergence.csv`, and `plots/selected_validation.png` contain the selected-configuration lifecycle check.
 - `final_configuration_checks.csv` contains the two short checks of the frozen final preset.
+- `final_policy.json`, `final_policy_convergence.csv`, and `plots/final_policy_convergence.png` contain final-run provenance, every evaluated milestone, and the resulting convergence plot.
+- `traversal_scaling.json` records the single-process preliminary scaling baseline and its limits.
+- `lifecycle_gate.json` records the final Leduc lifecycle completeness checks.
 
 Large checkpoints and neural snapshots remain under ignored `runs/` directories.

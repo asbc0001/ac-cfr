@@ -1,6 +1,6 @@
 # Final tabular policies
 
-These are the selected optimised CFR, CFR+, and MCCFR average policies for Kuhn and Leduc poker. Training used fixed iteration budgets with early stopping disabled.
+This directory records the selected optimised CFR, CFR+, and MCCFR average policies for Kuhn and Leduc poker. Training used fixed iteration budgets with early stopping disabled.
 
 ## Training budgets
 

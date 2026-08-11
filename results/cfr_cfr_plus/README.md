@@ -1,5 +1,7 @@
 # CFR/CFR+ correctness and performance gate
 
+This directory records the correctness, convergence, profiling, and fixed-workload benchmark evidence for reference and optimised CFR/CFR+.
+
 **Status: PASS**
 
 ## Scope
