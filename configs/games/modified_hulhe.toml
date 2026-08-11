@@ -1,0 +1,13 @@
+format_version = 1
+configuration_id = "modified_hulhe"
+state_encoding_id = "holdem"
+
+[rules]
+start_street = "flop"
+max_bets_per_round = 2
+small_blind = 0.5
+big_blind = 1
+small_bet = 1
+big_bet = 2
+button_player = 0
+synthetic_flop_start = true
