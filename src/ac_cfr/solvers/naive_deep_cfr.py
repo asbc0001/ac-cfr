@@ -14,7 +14,13 @@ from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, build_leduc_neural_dat
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.models import DeepCFRNetwork, build_deep_cfr_network
 from ac_cfr.training.config import DeepCFRTrainingConfig
-from ac_cfr.training.reservoirs import AdvantageSample, StrategySample, UniformReservoir
+from ac_cfr.training.reservoirs import (
+    AdvantageSample,
+    PackedAdvantageReservoir,
+    PackedStrategyReservoir,
+    StrategySample,
+    UniformReservoir,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,12 +156,15 @@ class NaiveDeepCFR:
     @property
     def advantage_reservoirs(
         self,
-    ) -> tuple[UniformReservoir[AdvantageSample], UniformReservoir[AdvantageSample]]:
+    ) -> tuple[
+        UniformReservoir[AdvantageSample] | PackedAdvantageReservoir,
+        UniformReservoir[AdvantageSample] | PackedAdvantageReservoir,
+    ]:
         """Return the two player-specific advantage reservoirs."""
         return self._advantage_reservoirs
 
     @property
-    def strategy_reservoir(self) -> UniformReservoir[StrategySample]:
+    def strategy_reservoir(self) -> UniformReservoir[StrategySample] | PackedStrategyReservoir:
         """Return the shared average-strategy reservoir."""
         return self._strategy_reservoir
 
@@ -541,10 +550,52 @@ def _train_network(
         dtype=torch.float32,
     )
     sample_iterations = torch.tensor([sample.iteration for sample in samples], dtype=torch.float32)
+    return _train_network_tensors(
+        network=network,
+        states=states,
+        action_masks=action_masks,
+        targets=targets,
+        sample_iterations=sample_iterations,
+        current_iteration=current_iteration,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        data_seed=data_seed,
+        training_seed=training_seed,
+        strategy_targets=strategy_targets,
+        validation_fraction=validation_fraction,
+        max_gradient_norm=max_gradient_norm,
+    )
+
+
+def _train_network_tensors(
+    *,
+    network: DeepCFRNetwork,
+    states: Tensor,
+    action_masks: Tensor,
+    targets: Tensor,
+    sample_iterations: Tensor,
+    current_iteration: int,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    data_seed: int,
+    training_seed: int,
+    strategy_targets: bool,
+    validation_fraction: float,
+    max_gradient_norm: float | None,
+) -> _LossMetrics:
+    """Train directly from packed sample tensors with the reference loss and schedule."""
+    if states.ndim != 2 or len(states) == 0:
+        raise ValueError("cannot train a network from empty or malformed states")
+    if len(action_masks) != len(states) or len(targets) != len(states):
+        raise ValueError("packed action data must match the state count")
+    if sample_iterations.shape != (len(states),):
+        raise ValueError("packed sample iterations must match the state count")
     optimiser = torch.optim.Adam(network.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(data_seed)
     training_indices, validation_indices = _split_training_indices(
-        len(samples), validation_fraction, generator
+        len(states), validation_fraction, generator
     )
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(training_seed)

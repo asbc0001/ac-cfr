@@ -51,7 +51,7 @@ def save_deep_cfr_checkpoint(
     metric_records: tuple[dict[str, str], ...] = (),
 ) -> None:
     """Atomically save every value needed at a completed outer iteration."""
-    if not isinstance(solver, NaiveDeepCFR):
+    if type(solver) is not NaiveDeepCFR:
         raise TypeError("solver must be a NaiveDeepCFR")
     for name, value in (
         ("run_id", run_id),
