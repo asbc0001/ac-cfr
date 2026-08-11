@@ -10,7 +10,12 @@ import torch
 from numpy.typing import NDArray
 from torch import Tensor
 
-from ac_cfr.common.config import GameConfigurationId, ModelConfigId, StateEncodingId
+from ac_cfr.common.config import (
+    DeepCFRImplementationId,
+    GameConfigurationId,
+    ModelConfigId,
+    StateEncodingId,
+)
 from ac_cfr.games.base import GameId
 from ac_cfr.games.leduc_neural import build_leduc_neural_data
 from ac_cfr.games.tree import IndexedGameTree
@@ -26,7 +31,7 @@ from ac_cfr.training.config import DeepCFRTrainingConfig
 
 DEEP_CFR_SNAPSHOT_SCHEMA_VERSION = 1
 PROJECT_VERSION = version("ac-cfr")
-_SOLVER_ID = "naive_deep_cfr"
+_LEGACY_SOLVER_ID = "naive_deep_cfr"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +69,7 @@ def export_deep_cfr_snapshot(
     network: DeepCFRNetwork,
     tree: IndexedGameTree,
     config: DeepCFRTrainingConfig,
+    implementation: DeepCFRImplementationId,
     snapshot_id: str,
     iteration: int,
     run_id: str,
@@ -72,6 +78,8 @@ def export_deep_cfr_snapshot(
     """Atomically export only the data needed to query one average strategy."""
     if not isinstance(network, DeepCFRNetwork):
         raise TypeError("network must be a DeepCFRNetwork")
+    if not isinstance(implementation, DeepCFRImplementationId):
+        raise TypeError("implementation must be a DeepCFRImplementationId")
     _validate_tree(tree)
     if network.config != deep_cfr_network_config(
         config.model_config_id,
@@ -93,7 +101,7 @@ def export_deep_cfr_snapshot(
         snapshot_id=snapshot_id,
         game=GameId.LEDUC.value,
         game_version=GameConfigurationId.LEDUC.value,
-        solver=_SOLVER_ID,
+        solver=implementation.value,
         training_iteration=iteration,
         run_id=run_id,
         seed=config.seed,
@@ -204,7 +212,6 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> DeepCFRSnapshot
         "project_version": PROJECT_VERSION,
         "game": GameId.LEDUC.value,
         "game_version": GameConfigurationId.LEDUC.value,
-        "solver": _SOLVER_ID,
         "state_encoding": StateEncodingId.LEDUC_NEURAL.value,
         "action_space": ACTION_SPACE_ID,
         "tree_digest": tree_compatibility_digest(tree),
@@ -212,6 +219,11 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> DeepCFRSnapshot
     for field, expected_value in expected.items():
         if getattr(metadata, field) != expected_value:
             raise ValueError(f"Deep CFR snapshot has incompatible {field}")
+    if metadata.solver not in {
+        _LEGACY_SOLVER_ID,
+        *(implementation.value for implementation in DeepCFRImplementationId),
+    }:
+        raise ValueError("Deep CFR snapshot has incompatible solver")
     _validate_positive_iteration(metadata.training_iteration)
     if isinstance(metadata.seed, bool) or not isinstance(metadata.seed, int):
         raise ValueError("Deep CFR snapshot seed is invalid")

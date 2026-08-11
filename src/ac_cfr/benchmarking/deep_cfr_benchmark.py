@@ -417,7 +417,7 @@ def _convergence_worker(connection: Connection, solver_type: type[NaiveDeepCFR])
         torch.set_num_threads(PYTORCH_INTRAOP_THREADS)
         torch.set_num_interop_threads(PYTORCH_INTEROP_THREADS)
         tree = compile_game_tree(LeducGame(), LeducConfig())
-        _warm_up_solver(solver_type, tree)
+        warm_up_deep_cfr_solver(solver_type, tree, _runtime_config(), seed=BENCHMARK_SEED)
         solver = solver_type(tree, _convergence_config(), _runtime_config())
         elapsed_training_seconds = 0.0
         points: list[tuple[int, float, float, float, float]] = []
@@ -457,7 +457,7 @@ def _benchmark_worker(connection: Connection, solver_type: type[NaiveDeepCFR]) -
         torch.set_num_threads(PYTORCH_INTRAOP_THREADS)
         torch.set_num_interop_threads(PYTORCH_INTEROP_THREADS)
         tree = compile_game_tree(LeducGame(), LeducConfig())
-        _warm_up_solver(solver_type, tree)
+        warm_up_deep_cfr_solver(solver_type, tree, _runtime_config(), seed=BENCHMARK_SEED)
         solver = solver_type(tree, _benchmark_config(), _runtime_config())
         connection.send(("ready",))
         if connection.recv() != "start":
@@ -496,8 +496,14 @@ def _benchmark_worker(connection: Connection, solver_type: type[NaiveDeepCFR]) -
         connection.close()
 
 
-def _warm_up_solver(solver_type: type[NaiveDeepCFR], tree: IndexedGameTree) -> None:
-    """Exercise PyTorch and optional compiled paths before formal timing."""
+def warm_up_deep_cfr_solver(
+    solver_type: type[NaiveDeepCFR],
+    tree: IndexedGameTree,
+    runtime: DeepCFRRuntimeConfig,
+    *,
+    seed: int,
+) -> None:
+    """Exercise PyTorch and optional compiled paths before measurement."""
     config = DeepCFRTrainingConfig(
         iterations=1,
         traversals_per_player=16,
@@ -510,9 +516,9 @@ def _warm_up_solver(solver_type: type[NaiveDeepCFR], tree: IndexedGameTree) -> N
         validation_fraction=0.1,
         max_gradient_norm=10.0,
         dropout_probability=0.0,
-        seed=BENCHMARK_SEED,
+        seed=seed,
     )
-    solver_type(tree, config, _runtime_config(inference_batch_size=32)).train(1)
+    solver_type(tree, config, replace(runtime, inference_batch_size=32)).train(1)
 
 
 def _benchmark_config() -> DeepCFRTrainingConfig:

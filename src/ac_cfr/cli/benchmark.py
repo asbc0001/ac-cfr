@@ -15,6 +15,7 @@ from ac_cfr.benchmarking.deep_cfr_profiling import run_deep_cfr_profiling
 from ac_cfr.benchmarking.deep_cfr_reference_validation import (
     run_deep_cfr_reference_validation,
 )
+from ac_cfr.benchmarking.deep_cfr_sensitivity import run_deep_cfr_sensitivity_study
 from ac_cfr.benchmarking.harness import run_tabular_benchmark
 from ac_cfr.benchmarking.mccfr_gate import run_mccfr_gate
 from ac_cfr.benchmarking.mccfr_validation import run_mccfr_validation
@@ -34,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "deep-cfr-profile",
             "deep-cfr-benchmark",
             "deep-cfr-comparison",
+            "deep-cfr-sensitivity",
         ),
     )
     parser.add_argument("--output", type=Path)
@@ -91,13 +93,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 progress_callback=print,
             )
             result_label = "benchmark"
-        else:
+        elif arguments.suite == "deep-cfr-comparison":
             output_directory = arguments.output or Path("results/deep_cfr")
             result_path = run_deep_cfr_convergence_comparison(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "comparison"
+        else:
+            output_directory = arguments.output or Path("results/deep_cfr")
+            result_path = run_deep_cfr_sensitivity_study(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "configuration study"
         print(f"{result_label}: {result_path}")
         return 0
 

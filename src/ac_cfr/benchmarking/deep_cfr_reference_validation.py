@@ -9,6 +9,7 @@ from statistics import median
 from typing import Final
 
 from ac_cfr.benchmarking.harness import report_progress
+from ac_cfr.common.config import DeepCFRImplementationId
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
@@ -155,6 +156,7 @@ def _run_config(run_id: str, seed: int) -> DeepCFRRunConfig:
     """Return the explicit version-controlled reference-validation workload."""
     return DeepCFRRunConfig(
         run_id=run_id,
+        implementation=DeepCFRImplementationId.REFERENCE,
         checkpoint_interval=5,
         training=DeepCFRTrainingConfig(
             iterations=MILESTONES[-1],

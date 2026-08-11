@@ -4,7 +4,7 @@ import argparse
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ac_cfr.common.config import ModelConfigId
+from ac_cfr.common.config import DeepCFRImplementationId, ModelConfigId
 from ac_cfr.evaluation.plotting import (
     plot_deep_cfr_training_diagnostics,
     plot_training_diagnostics,
@@ -49,6 +49,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.runs_root,
                 arguments.evaluation_interval,
                 arguments.checkpoint_interval,
+                arguments.implementation,
                 arguments.snapshot_iterations,
                 arguments.averaging_delay,
                 arguments.early_stopping_minimum_improvement,
@@ -96,7 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if arguments.config is None:
                 parser.error("new Deep CFR training requires --config")
             if arguments.game not in (None, "leduc"):
-                parser.error("naive_deep_cfr supports only --game leduc")
+                parser.error("Deep CFR supports only --game leduc")
             if any(
                 value is not None
                 for value in (
@@ -184,6 +185,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--evaluation-interval", type=int)
     parser.add_argument("--checkpoint-interval", type=int)
+    parser.add_argument(
+        "--implementation",
+        choices=tuple(implementation.value for implementation in DeepCFRImplementationId),
+    )
     parser.add_argument(
         "--snapshot-iterations",
         help="Comma-separated outer iterations; the final policy is always exported.",
@@ -299,6 +304,7 @@ def _deep_cfr_overrides(
         "iterations",
         "seed",
         "checkpoint_interval",
+        "implementation",
         "traversals_per_player",
         "advantage_reservoir_capacity",
         "strategy_reservoir_capacity",
@@ -341,6 +347,7 @@ def _reject_deep_cfr_options(
         "validation_fraction",
         "max_gradient_norm",
         "dropout_probability",
+        "implementation",
     )
     if any(getattr(arguments, name) is not None for name in names):
-        parser.error("Deep CFR neural-training options require --solver naive_deep_cfr")
+        parser.error("Deep CFR options require --solver deep_cfr")

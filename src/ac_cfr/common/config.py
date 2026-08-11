@@ -39,3 +39,10 @@ class OptimizerId(StrEnum):
     """Identifiers for configured neural-network optimisers."""
 
     ADAM = "adam"
+
+
+class DeepCFRImplementationId(StrEnum):
+    """Selectable Deep CFR solver implementations."""
+
+    REFERENCE = "reference"
+    OPTIMISED = "optimised"

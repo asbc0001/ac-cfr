@@ -5,13 +5,16 @@ from pathlib import Path
 import pytest
 import torch
 
+from ac_cfr.common.config import DeepCFRImplementationId
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import compile_game_tree
+from ac_cfr.persistence.deep_cfr_checkpoints import load_deep_cfr_checkpoint
 from ac_cfr.persistence.deep_cfr_snapshots import (
     deep_cfr_policy,
     load_deep_cfr_snapshot,
 )
+from ac_cfr.solvers import DeepCFR
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import (
     DeepCFRRunConfig,
@@ -23,6 +26,7 @@ from ac_cfr.training.deep_cfr_runner import (
 def _run_config() -> DeepCFRRunConfig:
     return DeepCFRRunConfig(
         run_id="deep_cfr_workflow_test",
+        implementation=DeepCFRImplementationId.OPTIMISED,
         checkpoint_interval=1,
         training=DeepCFRTrainingConfig(
             iterations=2,
@@ -56,7 +60,9 @@ def test_deep_cfr_run_resumes_metrics_and_exports_exactly_evaluable_snapshots(
         (outcome.run_directory / "run_config.json").read_text(encoding="utf-8")
     )
     assert saved_config["run_config"] == _run_config().to_dict()
-    resumed = resume_deep_cfr_training(outcome.run_directory / "checkpoints" / "iter_1.pt")
+    resume_path = outcome.run_directory / "checkpoints" / "iter_1.pt"
+    assert type(load_deep_cfr_checkpoint(resume_path, tree).solver) is DeepCFR
+    resumed = resume_deep_cfr_training(resume_path)
     with (resumed.run_directory / "metrics.csv").open(encoding="utf-8", newline="") as file:
         records = list(csv.DictReader(file))
     assert [record["iteration"] for record in records] == ["1", "2"]
@@ -68,6 +74,14 @@ def test_deep_cfr_run_resumes_metrics_and_exports_exactly_evaluable_snapshots(
     metrics = evaluate_strategy(tree, deep_cfr_policy(tree, final_snapshot.network))
     assert metrics.exploitability == pytest.approx(float(records[-1]["exploitability"]))
     assert all(not parameter.requires_grad for parameter in final_snapshot.network.parameters())
+
+    saved_config["run_config"]["implementation"] = "reference"
+    (outcome.run_directory / "run_config.json").write_text(
+        json.dumps(saved_config),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="implementation"):
+        resume_deep_cfr_training(resume_path)
 
 
 def test_deep_cfr_snapshot_rejects_incompatible_architecture(tmp_path: Path) -> None:

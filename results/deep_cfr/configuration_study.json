@@ -1,0 +1,189 @@
+{
+  "about": "One-factor optimised Leduc Deep CFR sensitivity study for selecting a reasonable compute-quality configuration; this is not exhaustive tuning.",
+  "baseline_preset": "configs/deep_cfr/leduc_baseline.toml",
+  "cases": [
+    {
+      "changed_factor": "none",
+      "name": "baseline",
+      "training": {
+        "advantage_reservoir_capacity": 100000,
+        "advantage_training_steps": 100,
+        "dropout_probability": 0.0,
+        "iterations": 20,
+        "learning_rate": 0.001,
+        "max_gradient_norm": 10.0,
+        "model_config_id": "leduc_deep_cfr",
+        "optimizer_id": "adam",
+        "seed": 20260811,
+        "snapshot_iterations": [],
+        "state_encoding_id": "leduc_neural",
+        "strategy_reservoir_capacity": 100000,
+        "strategy_training_steps": 200,
+        "training_batch_size": 512,
+        "traversals_per_player": 1000,
+        "validation_fraction": 0.1
+      }
+    },
+    {
+      "changed_factor": "traversals_per_player",
+      "name": "lower_k",
+      "training": {
+        "advantage_reservoir_capacity": 100000,
+        "advantage_training_steps": 100,
+        "dropout_probability": 0.0,
+        "iterations": 20,
+        "learning_rate": 0.001,
+        "max_gradient_norm": 10.0,
+        "model_config_id": "leduc_deep_cfr",
+        "optimizer_id": "adam",
+        "seed": 20260811,
+        "snapshot_iterations": [],
+        "state_encoding_id": "leduc_neural",
+        "strategy_reservoir_capacity": 100000,
+        "strategy_training_steps": 200,
+        "training_batch_size": 512,
+        "traversals_per_player": 500,
+        "validation_fraction": 0.1
+      }
+    },
+    {
+      "changed_factor": "advantage_training_steps",
+      "name": "lower_advantage_steps",
+      "training": {
+        "advantage_reservoir_capacity": 100000,
+        "advantage_training_steps": 50,
+        "dropout_probability": 0.0,
+        "iterations": 20,
+        "learning_rate": 0.001,
+        "max_gradient_norm": 10.0,
+        "model_config_id": "leduc_deep_cfr",
+        "optimizer_id": "adam",
+        "seed": 20260811,
+        "snapshot_iterations": [],
+        "state_encoding_id": "leduc_neural",
+        "strategy_reservoir_capacity": 100000,
+        "strategy_training_steps": 200,
+        "training_batch_size": 512,
+        "traversals_per_player": 1000,
+        "validation_fraction": 0.1
+      }
+    },
+    {
+      "changed_factor": "advantage_training_steps",
+      "name": "advantage_steps_150",
+      "training": {
+        "advantage_reservoir_capacity": 100000,
+        "advantage_training_steps": 150,
+        "dropout_probability": 0.0,
+        "iterations": 20,
+        "learning_rate": 0.001,
+        "max_gradient_norm": 10.0,
+        "model_config_id": "leduc_deep_cfr",
+        "optimizer_id": "adam",
+        "seed": 20260811,
+        "snapshot_iterations": [],
+        "state_encoding_id": "leduc_neural",
+        "strategy_reservoir_capacity": 100000,
+        "strategy_training_steps": 200,
+        "training_batch_size": 512,
+        "traversals_per_player": 1000,
+        "validation_fraction": 0.1
+      }
+    },
+    {
+      "changed_factor": "advantage_training_steps",
+      "name": "advantage_steps_200",
+      "training": {
+        "advantage_reservoir_capacity": 100000,
+        "advantage_training_steps": 200,
+        "dropout_probability": 0.0,
+        "iterations": 20,
+        "learning_rate": 0.001,
+        "max_gradient_norm": 10.0,
+        "model_config_id": "leduc_deep_cfr",
+        "optimizer_id": "adam",
+        "seed": 20260811,
+        "snapshot_iterations": [],
+        "state_encoding_id": "leduc_neural",
+        "strategy_reservoir_capacity": 100000,
+        "strategy_training_steps": 200,
+        "training_batch_size": 512,
+        "traversals_per_player": 1000,
+        "validation_fraction": 0.1
+      }
+    },
+    {
+      "changed_factor": "model_config_id",
+      "name": "smaller_network",
+      "training": {
+        "advantage_reservoir_capacity": 100000,
+        "advantage_training_steps": 100,
+        "dropout_probability": 0.0,
+        "iterations": 20,
+        "learning_rate": 0.001,
+        "max_gradient_norm": 10.0,
+        "model_config_id": "leduc_deep_cfr_small",
+        "optimizer_id": "adam",
+        "seed": 20260811,
+        "snapshot_iterations": [],
+        "state_encoding_id": "leduc_neural",
+        "strategy_reservoir_capacity": 100000,
+        "strategy_training_steps": 200,
+        "training_batch_size": 512,
+        "traversals_per_player": 1000,
+        "validation_fraction": 0.1
+      }
+    }
+  ],
+  "environment": {
+    "available_cpu_count": 8,
+    "available_memory_bytes": 12502941696,
+    "code_revision": "7355c2627783b4119c550bc05e4cc79efb9596f7-dirty",
+    "device": "cpu",
+    "executable": "/home/asbch/ac-cfr/.venv/bin/python",
+    "logical_cpu_count": 8,
+    "machine": "x86_64",
+    "numba": "0.66.0",
+    "numpy": "2.4.6",
+    "physical_cpu_count": 8,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python": "3.12.3",
+    "torch": "2.13.0",
+    "total_memory_bytes": 16514670592,
+    "wsl2": true,
+    "wsl_config_paths": []
+  },
+  "execution_order": [
+    "baseline",
+    "lower_k",
+    "lower_advantage_steps",
+    "advantage_steps_150",
+    "advantage_steps_200",
+    "smaller_network"
+  ],
+  "files": {
+    "measurements": "configuration_study.csv",
+    "plot": "plots/configuration_sensitivity.png"
+  },
+  "method": {
+    "exact_evaluation_outside_timing": true,
+    "implementation": "optimised",
+    "memory_measures": [
+      "allocated packed reservoir arrays",
+      "trained network parameters"
+    ],
+    "one_factor_at_a_time": true,
+    "repetitions": 1,
+    "seed": 20260811,
+    "timing_interpretation": "Coarse phase-cost comparison only; formal repeated implementation timings remain in benchmark_summary.csv.",
+    "timed_region": "solver.train only",
+    "warm_up_before_measurement": true
+  },
+  "runtime": {
+    "cpu_threads": 1,
+    "device": "cpu",
+    "inference_batch_size": 512
+  },
+  "study_id": "deep_cfr_configuration"
+}

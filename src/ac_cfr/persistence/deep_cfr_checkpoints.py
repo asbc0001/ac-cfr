@@ -1,4 +1,4 @@
-"""Atomic, validated training checkpoints for reference Deep CFR."""
+"""Atomic, validated training checkpoints for Deep CFR implementations."""
 
 import pickle
 from dataclasses import dataclass
@@ -10,13 +10,14 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from ac_cfr.common.config import GameConfigurationId
+from ac_cfr.common.config import DeepCFRImplementationId, GameConfigurationId
 from ac_cfr.games.base import GameId
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, LEDUC_NEURAL_STATE_SIZE
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.models import DeepCFRNetwork, build_deep_cfr_network, deep_cfr_network_config
 from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, tree_compatibility_digest
 from ac_cfr.persistence.files import atomic_binary_writer
+from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import (
@@ -27,13 +28,12 @@ from ac_cfr.training.reservoirs import (
 
 DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 3
 PROJECT_VERSION = version("ac-cfr")
-_SOLVER_ID = "naive_deep_cfr"
 _RNG_CONTRACT = "python_random_and_derived_torch_v1"
 
 
 @dataclass(frozen=True, slots=True)
 class LoadedDeepCFRCheckpoint:
-    """Validated metadata and a fully reconstructed reference solver."""
+    """Validated metadata and a fully reconstructed Deep CFR solver."""
 
     metadata: dict[str, Any]
     solver: NaiveDeepCFR
@@ -51,8 +51,7 @@ def save_deep_cfr_checkpoint(
     metric_records: tuple[dict[str, str], ...] = (),
 ) -> None:
     """Atomically save every value needed at a completed outer iteration."""
-    if type(solver) is not NaiveDeepCFR:
-        raise TypeError("solver must be a NaiveDeepCFR")
+    implementation = deep_cfr_implementation(solver)
     for name, value in (
         ("run_id", run_id),
         ("checkpoint_id", checkpoint_id),
@@ -88,7 +87,7 @@ def save_deep_cfr_checkpoint(
         "state_encoding": config.state_encoding_id.value,
         "action_space": ACTION_SPACE_ID,
         "tree_digest": tree_compatibility_digest(solver.tree),
-        "solver": _SOLVER_ID,
+        "solver": implementation.value,
         "model_config_id": config.model_config_id.value,
         "optimizer_id": config.optimizer_id.value,
         "reservoir_schema_version": DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
@@ -145,7 +144,7 @@ def load_deep_cfr_checkpoint(
     *,
     map_location: str | torch.device = "cpu",
 ) -> LoadedDeepCFRCheckpoint:
-    """Safely load, validate, and reconstruct one reference Deep CFR solver."""
+    """Safely load, validate, and reconstruct the recorded Deep CFR implementation."""
     if not isinstance(tree, IndexedGameTree):
         raise TypeError("tree must be an IndexedGameTree")
     try:
@@ -171,6 +170,7 @@ def load_deep_cfr_checkpoint(
         raise ValueError("Deep CFR checkpoint fields are incomplete or unexpected")
 
     metadata = _validated_metadata(payload["metadata"], tree)
+    implementation = DeepCFRImplementationId(metadata["solver"])
     config = DeepCFRTrainingConfig.from_dict(metadata["training_config"])
     runtime = DeepCFRRuntimeConfig.from_dict(metadata["runtime_config"])
     expected_architecture = deep_cfr_network_config(
@@ -202,7 +202,7 @@ def load_deep_cfr_checkpoint(
     )
     rng_state = _validated_rng_state(payload["rng_state"])
 
-    solver = NaiveDeepCFR(tree, config, runtime)
+    solver = deep_cfr_solver_type(implementation)(tree, config, runtime)
     for player, samples in enumerate(advantage_reservoirs):
         reservoir_state = payload["advantage_reservoirs"][player]
         solver.advantage_reservoirs[player].restore_training_state(
@@ -267,13 +267,16 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
         "game_version": GameConfigurationId.LEDUC.value,
         "action_space": ACTION_SPACE_ID,
         "tree_digest": tree_compatibility_digest(tree),
-        "solver": _SOLVER_ID,
         "reservoir_schema_version": DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
         "rng_contract": _RNG_CONTRACT,
     }
     for field_name, expected_value in expected.items():
         if metadata[field_name] != expected_value:
             raise ValueError(f"Deep CFR checkpoint has incompatible {field_name}")
+    try:
+        DeepCFRImplementationId(metadata["solver"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("Deep CFR checkpoint has incompatible solver") from error
     for field_name in ("code_revision", "run_id", "checkpoint_id"):
         if not isinstance(metadata[field_name], str) or not metadata[field_name]:
             raise ValueError(f"Deep CFR checkpoint {field_name} is invalid")

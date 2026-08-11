@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from ac_cfr.common.config import ModelConfigId, StateEncodingId
+from ac_cfr.benchmarking.deep_cfr_sensitivity import deep_cfr_sensitivity_cases
+from ac_cfr.common.config import DeepCFRImplementationId, ModelConfigId, StateEncodingId
 from ac_cfr.games.leduc_neural import LEDUC_NEURAL_STATE_SIZE
 from ac_cfr.training.config import DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_config import load_deep_cfr_run_config
@@ -55,12 +56,14 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Pa
         run_id="configured_deep_cfr",
         overrides={
             "iterations": 12,
+            "implementation": DeepCFRImplementationId.REFERENCE.value,
             "snapshot_iterations": (2, 12),
             "inference_batch_size": 256,
             "model_config_id": ModelConfigId.LEDUC_DEEP_CFR_SMALL.value,
         },
     )
 
+    assert config.implementation is DeepCFRImplementationId.REFERENCE
     assert config.training.iterations == 12
     assert config.training.snapshot_iterations == (2, 12)
     assert config.training.model_config_id is ModelConfigId.LEDUC_DEEP_CFR_SMALL
@@ -87,3 +90,31 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Pa
     )
     with pytest.raises(ValueError, match="runtime configuration fields"):
         load_deep_cfr_run_config(invalid_preset, run_id="invalid_preset")
+
+
+def test_deep_cfr_sensitivity_cases_change_one_declared_factor() -> None:
+    config_directory = Path(__file__).parents[2] / "configs" / "deep_cfr"
+    preset = config_directory / "leduc_baseline.toml"
+    baseline = load_deep_cfr_run_config(preset, run_id="sensitivity_test").training
+    cases = deep_cfr_sensitivity_cases(baseline)
+
+    assert tuple(case.changed_factor for case in cases) == (
+        "none",
+        "traversals_per_player",
+        "advantage_training_steps",
+        "advantage_training_steps",
+        "advantage_training_steps",
+        "model_config_id",
+    )
+    baseline_values = baseline.to_dict()
+    for case in cases[1:]:
+        changed = {
+            name for name, value in case.config.to_dict().items() if value != baseline_values[name]
+        }
+        assert changed == {case.changed_factor}
+
+    selected = load_deep_cfr_run_config(
+        config_directory / "leduc_selected.toml",
+        run_id="selected_test",
+    )
+    assert selected.training.iterations == 100

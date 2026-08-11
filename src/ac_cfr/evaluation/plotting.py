@@ -277,6 +277,115 @@ def plot_deep_cfr_implementation_convergence(
     _save_figure(figure, output_path)
 
 
+def plot_deep_cfr_sensitivity(result_path: Path, output_path: Path) -> None:
+    """Compare quality, phase timing, validation loss, and throughput by configuration."""
+    records = _read_records(
+        result_path,
+        {
+            "case",
+            "exploitability",
+            "traversal_seconds",
+            "advantage_training_seconds",
+            "strategy_training_seconds",
+            "collection_traversals_per_second",
+            "player_zero_advantage_training_loss",
+            "player_zero_advantage_validation_loss",
+            "player_one_advantage_training_loss",
+            "player_one_advantage_validation_loss",
+            "strategy_training_loss",
+            "strategy_validation_loss",
+        },
+    )
+    expected_cases = (
+        "baseline",
+        "lower_k",
+        "lower_advantage_steps",
+        "advantage_steps_150",
+        "advantage_steps_200",
+        "smaller_network",
+    )
+    by_case = {record["case"]: record for record in records}
+    if set(by_case) != set(expected_cases):
+        raise ValueError("Deep CFR sensitivity results contain unexpected cases")
+    ordered = [by_case[name] for name in expected_cases]
+    labels = (
+        "Baseline",
+        "Lower K",
+        "50 advantage steps",
+        "150 advantage steps",
+        "200 advantage steps",
+        "Smaller network",
+    )
+    positions = list(range(len(ordered)))
+
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(13, 8))
+    quality_axis, time_axis, loss_axis, throughput_axis = figure.subplots(2, 2).flat
+    quality_axis.bar(
+        positions,
+        [float(record["exploitability"]) for record in ordered],
+        color="tab:blue",
+    )
+    quality_axis.set_ylabel("Exact exploitability (chips)")
+
+    bottoms = [0.0] * len(ordered)
+    for field, label, colour in (
+        ("traversal_seconds", "Traversal", "tab:blue"),
+        ("advantage_training_seconds", "Advantage training", "tab:orange"),
+        ("strategy_training_seconds", "Strategy training", "tab:green"),
+    ):
+        values = [float(record[field]) for record in ordered]
+        time_axis.bar(positions, values, bottom=bottoms, label=label, color=colour)
+        bottoms = [bottom + value for bottom, value in zip(bottoms, values, strict=True)]
+    time_axis.set_ylabel("Training time (seconds)")
+    time_axis.legend()
+
+    width = 0.25
+    for offset, training_field, validation_field, label in (
+        (
+            -width,
+            "player_zero_advantage_training_loss",
+            "player_zero_advantage_validation_loss",
+            "Player 0 advantage",
+        ),
+        (
+            0.0,
+            "player_one_advantage_training_loss",
+            "player_one_advantage_validation_loss",
+            "Player 1 advantage",
+        ),
+        (
+            width,
+            "strategy_training_loss",
+            "strategy_validation_loss",
+            "Average strategy",
+        ),
+    ):
+        loss_axis.bar(
+            [position + offset for position in positions],
+            [float(record[validation_field]) / float(record[training_field]) for record in ordered],
+            width=width,
+            label=label,
+        )
+    loss_axis.axhline(1.0, color="black", linestyle="--", linewidth=1.0)
+    loss_axis.set_ylabel("Held-out / training loss")
+    loss_axis.legend()
+
+    throughput_axis.bar(
+        positions,
+        [float(record["collection_traversals_per_second"]) for record in ordered],
+        color="tab:purple",
+    )
+    throughput_axis.set_ylabel("Traversal collection / second")
+    for axis in (quality_axis, time_axis, loss_axis, throughput_axis):
+        axis.set_xticks(positions, labels, rotation=15, ha="right")
+        axis.grid(axis="y", alpha=0.25)
+    figure.suptitle("Optimised Leduc Deep CFR configuration sensitivity")
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    _save_figure(figure, output_path)
+
+
 def plot_mccfr_validation(
     convergence_path: Path,
     summary_path: Path,

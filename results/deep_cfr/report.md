@@ -3,10 +3,11 @@
 - **Reference learning validation:** PASS
 - **Matched implementation convergence:** PASS
 - **Implementation profiling and benchmark:** COMPLETE
+- **Bounded configuration selection:** COMPLETE
 
 ## Scope
 
-These results validate Deep CFR learning and compare the reference and optimised implementations. They use fixed validation workloads rather than a tuned final Leduc configuration.
+These results validate Deep CFR learning, compare the reference and optimised implementations, and select a bounded Leduc configuration. The selected setup has not yet undergone the moderate multi-seed validation stage.
 
 Training uses fixed minibatch-update budgets sampled uniformly from the reservoirs, so neural-training cost does not grow automatically with reservoir size.
 
@@ -32,6 +33,25 @@ Both implementations improve along closely matched trajectories. Their final exp
 
 These short validation policies remain far above the validated tabular ceiling of `0.005` chips per hand. They establish correct learning behaviour, not final Deep CFR capability.
 
+## Configuration selection
+
+Six optimised runs changed one factor at a time over 20 outer iterations. This is a bounded sensitivity check, not an exhaustive search or a claim that the selected values are optimal.
+
+| Configuration | Changed factor | Training time | Exact exploitability |
+|---|---|---:|---:|
+| Baseline | None | 12.89 s | 1.0711 |
+| Lower K | 1,000 to 500 traversals per player | 10.63 s | 1.0142 |
+| Fewer advantage updates | 100 to 50 steps | 11.05 s | 1.8438 |
+| 150 advantage updates | 100 to 150 steps | 17.23 s | 1.0284 |
+| 200 advantage updates | 100 to 200 steps | 21.01 s | 1.0484 |
+| Smaller network | 64 to 32 units per hidden layer | 12.72 s | 1.6884 |
+
+Halving the advantage-training budget and shrinking the network materially reduced strategy quality. Raising the advantage budget to 150 or 200 steps improved this seed's exploitability by only 0.043 and 0.023 chips while increasing training time by 34% and 63%; 200 steps was also slightly worse than 150. The lower-K result was slightly better for this one seed, but one stochastic run does not show that half as many samples remains sufficient over longer training, and the saving was only 2.25 seconds. The selected Leduc configuration therefore retains `K = 1,000`, 100 advantage-training steps and the 64-unit network.
+
+Baseline training and held-out losses remained close, so this run showed no clear conventional overfitting. Packed reservoirs used 50.2 MB; trained network parameters used about 131 KB, meaning the smaller network would not materially reduce total memory while reservoir storage dominates.
+
+`leduc_selected.toml` freezes these learning settings for the next validation stage. Its 100-iteration budget and early/intermediate snapshots define the moderate validation run rather than another tuning variable.
+
 ## Engineering results
 
 The fixed benchmark gives each implementation 10,000 traversals and 100 optimizer steps. Three warmed fresh-process repetitions time only training; evaluation, plotting and startup are excluded. Both use one PyTorch CPU thread because these small Leduc networks run faster without multi-thread scheduling overhead.
@@ -55,5 +75,6 @@ Reference runs exported independently loadable policies at iterations 1, 5 and 1
 - `comparison.json`, `implementation_convergence.csv`, and `plots/implementation_convergence.png` contain the matched implementation comparison.
 - `benchmark.json`, `benchmark_*.csv`, and `plots/implementation_performance.png` contain the performance evidence.
 - `profiling.json` and `profiles/` contain the diagnostic workloads and profiles.
+- `configuration_study.json`, `configuration_study.csv`, and `plots/configuration_sensitivity.png` contain the bounded configuration study.
 
 Large checkpoints and neural snapshots remain under ignored `runs/` directories.

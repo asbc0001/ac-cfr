@@ -10,6 +10,7 @@ from typing import Final
 
 from torch.profiler import ProfilerActivity, profile
 
+from ac_cfr.benchmarking.deep_cfr_benchmark import warm_up_deep_cfr_solver
 from ac_cfr.benchmarking.harness import environment_record, report_progress
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
@@ -48,7 +49,12 @@ def run_deep_cfr_profiling(
 
     for implementation, solver_type in _IMPLEMENTATIONS:
         report_progress(progress_callback, f"warm-up: {implementation} Deep CFR")
-        _warm_up(solver_type)
+        warm_up_deep_cfr_solver(
+            solver_type,
+            _tree(),
+            _runtime_config(),
+            seed=PROFILE_SEED,
+        )
 
         report_progress(progress_callback, f"cProfile: {implementation} Deep CFR")
         cpu_path, cpu_record = _write_cpu_profile(profile_directory, implementation, solver_type)
@@ -130,25 +136,6 @@ def _torch_profile_config() -> DeepCFRTrainingConfig:
         dropout_probability=0.0,
         seed=PROFILE_SEED,
     )
-
-
-def _warm_up(solver_type: type[NaiveDeepCFR]) -> None:
-    """Initialise Numba and representative PyTorch paths outside profiling."""
-    config = DeepCFRTrainingConfig(
-        iterations=1,
-        traversals_per_player=16,
-        advantage_reservoir_capacity=1_000,
-        strategy_reservoir_capacity=1_000,
-        advantage_training_steps=2,
-        strategy_training_steps=2,
-        training_batch_size=32,
-        learning_rate=1e-3,
-        validation_fraction=0.1,
-        max_gradient_norm=10.0,
-        dropout_probability=0.0,
-        seed=PROFILE_SEED,
-    )
-    solver_type(_tree(), config, _runtime_config(inference_batch_size=32)).train(1)
 
 
 def _write_cpu_profile(

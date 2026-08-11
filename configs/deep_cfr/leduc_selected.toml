@@ -2,10 +2,10 @@ format_version = 1
 
 [run]
 implementation = "optimised"
-checkpoint_interval = 5
+checkpoint_interval = 10
 
 [training]
-iterations = 20
+iterations = 100
 traversals_per_player = 1000
 advantage_reservoir_capacity = 100000
 strategy_reservoir_capacity = 100000
@@ -17,7 +17,7 @@ validation_fraction = 0.1
 max_gradient_norm = 10.0
 dropout_probability = 0.0
 seed = 20260811
-snapshot_iterations = []
+snapshot_iterations = [1, 20, 50]
 model_config_id = "leduc_deep_cfr"
 state_encoding_id = "leduc_neural"
 optimizer_id = "adam"

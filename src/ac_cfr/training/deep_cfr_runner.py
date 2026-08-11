@@ -1,4 +1,4 @@
-"""Checkpointed reference Deep CFR training and exact Leduc evaluation."""
+"""Checkpointed Deep CFR training and exact Leduc evaluation."""
 
 import json
 import re
@@ -9,7 +9,7 @@ from time import perf_counter
 
 import torch
 
-from ac_cfr.common.config import GameConfigurationId
+from ac_cfr.common.config import DeepCFRImplementationId, GameConfigurationId
 from ac_cfr.common.provenance import code_revision
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId, UtilityUnit
@@ -26,18 +26,20 @@ from ac_cfr.persistence.deep_cfr_snapshots import (
 )
 from ac_cfr.persistence.files import atomic_text_writer
 from ac_cfr.persistence.results import DeepCFRMetricStore
+from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 
-DEEP_CFR_SOLVER_ID = "naive_deep_cfr"
+DEEP_CFR_SOLVER_ID = "deep_cfr"
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 @dataclass(frozen=True, slots=True)
 class DeepCFRRunConfig:
-    """Complete outer schedule for one reference Leduc Deep CFR run."""
+    """Complete outer schedule for one configured Leduc Deep CFR run."""
 
     run_id: str
+    implementation: DeepCFRImplementationId
     checkpoint_interval: int
     training: DeepCFRTrainingConfig
     runtime: DeepCFRRuntimeConfig
@@ -45,6 +47,8 @@ class DeepCFRRunConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or _IDENTIFIER_PATTERN.fullmatch(self.run_id) is None:
             raise ValueError("run_id contains unsupported characters")
+        if not isinstance(self.implementation, DeepCFRImplementationId):
+            raise TypeError("implementation must be a DeepCFRImplementationId")
         if isinstance(self.checkpoint_interval, bool) or not isinstance(
             self.checkpoint_interval, int
         ):
@@ -60,6 +64,7 @@ class DeepCFRRunConfig:
         """Return stable JSON-compatible run configuration values."""
         return {
             "run_id": self.run_id,
+            "implementation": self.implementation.value,
             "checkpoint_interval": self.checkpoint_interval,
             "training": self.training.to_dict(),
             "runtime": self.runtime.to_dict(),
@@ -70,6 +75,7 @@ class DeepCFRRunConfig:
         """Reconstruct and validate one stored run configuration."""
         if not isinstance(values, dict) or set(values) != {
             "run_id",
+            "implementation",
             "checkpoint_interval",
             "training",
             "runtime",
@@ -78,6 +84,7 @@ class DeepCFRRunConfig:
         try:
             return cls(
                 run_id=values["run_id"],
+                implementation=DeepCFRImplementationId(values["implementation"]),
                 checkpoint_interval=values["checkpoint_interval"],
                 training=DeepCFRTrainingConfig.from_dict(values["training"]),
                 runtime=DeepCFRRuntimeConfig.from_dict(values["runtime"]),
@@ -88,7 +95,7 @@ class DeepCFRRunConfig:
 
 @dataclass(frozen=True, slots=True)
 class DeepCFRTrainingOutcome:
-    """Paths and completed state produced by a reference Deep CFR run."""
+    """Paths and completed state produced by a Deep CFR run."""
 
     run_directory: Path
     latest_checkpoint: Path
@@ -102,7 +109,7 @@ def start_deep_cfr_training(
     runs_root: Path = Path("runs"),
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> DeepCFRTrainingOutcome:
-    """Start one configured reference Deep CFR run in a new directory."""
+    """Start one configured Deep CFR implementation in a new directory."""
     if not isinstance(config, DeepCFRRunConfig):
         raise TypeError("config must be a DeepCFRRunConfig")
     run_directory = runs_root / config.run_id
@@ -110,7 +117,7 @@ def start_deep_cfr_training(
         raise FileExistsError(f"run directory already exists: {run_directory}")
     _apply_runtime(config.runtime)
     tree = compile_game_tree(LeducGame(), LeducConfig())
-    solver = NaiveDeepCFR(tree, config.training, config.runtime)
+    solver = deep_cfr_solver_type(config.implementation)(tree, config.training, config.runtime)
     revision = code_revision()
     _write_run_config(run_directory / "run_config.json", config, revision)
     return _execute_schedule(
@@ -129,7 +136,7 @@ def resume_deep_cfr_training(
     *,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> DeepCFRTrainingOutcome:
-    """Resume one reference Deep CFR run from a complete outer iteration."""
+    """Resume the configured Deep CFR implementation from a complete iteration."""
     run_directory = checkpoint_path.parent.parent
     config = _load_run_config(run_directory / "run_config.json")
     _apply_runtime(config.runtime)
@@ -141,6 +148,8 @@ def resume_deep_cfr_training(
         raise ValueError("checkpoint training configuration does not match run_config.json")
     if config.runtime != loaded.solver.runtime:
         raise ValueError("checkpoint runtime configuration does not match run_config.json")
+    if config.implementation is not deep_cfr_implementation(loaded.solver):
+        raise ValueError("checkpoint implementation does not match run_config.json")
     result_store = DeepCFRMetricStore(run_directory / "metrics.csv")
     raw_records = loaded.run_state["metric_records"]
     if not isinstance(raw_records, list):
@@ -197,6 +206,7 @@ def _execute_schedule(
                 network=network,
                 tree=solver.tree,
                 config=config.training,
+                implementation=config.implementation,
                 snapshot_id=snapshot_id,
                 iteration=milestone,
                 run_id=config.run_id,
@@ -278,7 +288,7 @@ def _record_evaluation(
             "game": GameId.LEDUC.value,
             "game_version": GameConfigurationId.LEDUC.value,
             "utility_unit": UtilityUnit.CHIP.value,
-            "solver": DEEP_CFR_SOLVER_ID,
+            "solver": deep_cfr_implementation(solver).value,
             "run_id": run_id,
             "strategy_snapshot_id": snapshot_id,
             "source_checkpoint_id": checkpoint_id,

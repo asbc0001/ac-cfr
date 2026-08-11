@@ -4,11 +4,12 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
+from ac_cfr.common.config import DeepCFRImplementationId
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
 _FORMAT_VERSION = 1
-_RUN_FIELDS = {"checkpoint_interval"}
+_RUN_FIELDS = {"implementation", "checkpoint_interval"}
 _TRAINING_FIELDS = {
     "iterations",
     "traversals_per_player",
@@ -56,6 +57,7 @@ def load_deep_cfr_run_config(
             raise TypeError("checkpoint_interval must be an integer")
         return DeepCFRRunConfig(
             run_id=run_id,
+            implementation=DeepCFRImplementationId(run["implementation"]),
             checkpoint_interval=checkpoint_interval,
             training=DeepCFRTrainingConfig.from_dict(training),
             runtime=DeepCFRRuntimeConfig.from_dict(runtime),
