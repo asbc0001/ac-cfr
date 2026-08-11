@@ -61,6 +61,70 @@ def plot_training_diagnostics(result_path: Path, output_path: Path) -> None:
     _save_figure(figure, output_path)
 
 
+def plot_deep_cfr_training_diagnostics(result_path: Path, output_path: Path) -> None:
+    """Plot exact Leduc quality, neural losses, and traversal throughput."""
+    records = _read_records(
+        result_path,
+        {
+            "iteration",
+            "elapsed_training_seconds",
+            "exploitability",
+            "traversals_per_second",
+            "player_zero_advantage_training_loss",
+            "player_zero_advantage_validation_loss",
+            "player_one_advantage_training_loss",
+            "player_one_advantage_validation_loss",
+            "strategy_training_loss",
+            "strategy_validation_loss",
+        },
+    )
+    records.sort(key=lambda record: int(record["iteration"]))
+    iterations = [int(record["iteration"]) for record in records]
+    exploitability = [float(record["exploitability"]) for record in records]
+
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(12, 8))
+    iteration_axis, time_axis, loss_axis, throughput_axis = figure.subplots(2, 2).flat
+    iteration_axis.plot(iterations, exploitability, marker="o")
+    time_axis.plot(
+        [float(record["elapsed_training_seconds"]) for record in records],
+        exploitability,
+        marker="o",
+    )
+    for axis in (iteration_axis, time_axis):
+        axis.set_ylabel("Exact exploitability (chips)")
+        _use_log_scale_for_positive_values(axis, exploitability)
+    iteration_axis.set_xlabel("Deep CFR outer iterations")
+    time_axis.set_xlabel("Training time (seconds)")
+
+    for field, label in (
+        ("player_zero_advantage_validation_loss", "Player 0 advantage validation"),
+        ("player_one_advantage_validation_loss", "Player 1 advantage validation"),
+        ("strategy_validation_loss", "Average-strategy validation"),
+    ):
+        values = [float(record[field]) for record in records if record[field]]
+        x_values = [int(record["iteration"]) for record in records if record[field]]
+        if values:
+            loss_axis.plot(x_values, values, marker="o", label=label)
+    loss_axis.set_xlabel("Deep CFR outer iterations")
+    loss_axis.set_ylabel("Held-out loss")
+    loss_axis.legend()
+
+    throughput_axis.plot(
+        iterations,
+        [float(record["traversals_per_second"]) for record in records],
+        marker="o",
+    )
+    throughput_axis.set_xlabel("Deep CFR outer iterations")
+    throughput_axis.set_ylabel("Average sampled traversals / second")
+    for axis in (iteration_axis, time_axis, loss_axis, throughput_axis):
+        axis.grid(alpha=0.25)
+    figure.suptitle("Reference Deep CFR training on Leduc")
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    _save_figure(figure, output_path)
+
+
 def plot_exploitability_comparison(
     result_paths: tuple[Path, ...],
     output_path: Path,
@@ -231,6 +295,81 @@ def plot_mccfr_reference_convergence(
     iteration_axis.set_xlabel("MCCFR iterations")
     time_axis.set_xlabel("Solver training time per seed (seconds)")
     figure.suptitle("Reference MCCFR convergence on Leduc across five seeds")
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
+    _save_figure(figure, output_path)
+
+
+def plot_deep_cfr_reference_convergence(
+    convergence_path: Path,
+    summary_path: Path,
+    output_path: Path,
+    *,
+    tabular_reference_exploitability: float,
+) -> None:
+    """Plot reference Deep CFR quality by outer iterations and training time."""
+    convergence = _read_records(
+        convergence_path,
+        {"seed", "iteration", "elapsed_training_seconds", "exploitability"},
+    )
+    summary = _read_records(
+        summary_path,
+        {"iteration", "median_elapsed_training_seconds", "median_exploitability"},
+    )
+
+    from matplotlib.figure import Figure
+
+    figure = Figure(figsize=(12, 4.8))
+    iteration_axis, time_axis = figure.subplots(1, 2)
+    for seed in sorted({record["seed"] for record in convergence}, key=int):
+        records = sorted(
+            (record for record in convergence if record["seed"] == seed),
+            key=lambda record: int(record["iteration"]),
+        )
+        values = [float(record["exploitability"]) for record in records]
+        iteration_axis.plot(
+            [int(record["iteration"]) for record in records],
+            values,
+            color="tab:blue",
+            alpha=0.25,
+        )
+        time_axis.plot(
+            [float(record["elapsed_training_seconds"]) for record in records],
+            values,
+            color="tab:blue",
+            alpha=0.25,
+        )
+    summary.sort(key=lambda record: int(record["iteration"]))
+    median_values = [float(record["median_exploitability"]) for record in summary]
+    iteration_axis.plot(
+        [int(record["iteration"]) for record in summary],
+        median_values,
+        color="tab:blue",
+        marker="o",
+        linewidth=2,
+        label="Median across seeds",
+    )
+    time_axis.plot(
+        [float(record["median_elapsed_training_seconds"]) for record in summary],
+        median_values,
+        color="tab:blue",
+        marker="o",
+        linewidth=2,
+        label="Median across seeds",
+    )
+    for axis in (iteration_axis, time_axis):
+        axis.axhline(
+            tabular_reference_exploitability,
+            color="tab:orange",
+            linestyle="--",
+            label="Validated tabular ceiling",
+        )
+        axis.set_yscale("log")
+        axis.set_ylabel("Exact exploitability (chips)")
+        axis.grid(alpha=0.25)
+        axis.legend()
+    iteration_axis.set_xlabel("Deep CFR outer iterations")
+    time_axis.set_xlabel("Training time per seed (seconds)")
+    figure.suptitle("Reference Deep CFR convergence on Leduc")
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
     _save_figure(figure, output_path)
 

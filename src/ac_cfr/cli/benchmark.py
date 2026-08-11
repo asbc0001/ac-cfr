@@ -1,4 +1,4 @@
-"""Command-line entry point for tabular benchmarks and validation suites."""
+"""Command-line entry point for poker-solver benchmarks and validation suites."""
 
 import argparse
 import json
@@ -7,6 +7,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ac_cfr.benchmarking.cfr_gate import BENCHMARK_ID, run_cfr_gate
+from ac_cfr.benchmarking.deep_cfr_reference_validation import (
+    run_deep_cfr_reference_validation,
+)
 from ac_cfr.benchmarking.harness import run_tabular_benchmark
 from ac_cfr.benchmarking.mccfr_gate import run_mccfr_gate
 from ac_cfr.benchmarking.mccfr_reference_validation import (
@@ -18,7 +21,7 @@ from ac_cfr.training.runner import SOLVER_IDS
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run a declared benchmark workload or validation suite."""
-    parser = argparse.ArgumentParser(description="Benchmark and validate tabular poker solvers.")
+    parser = argparse.ArgumentParser(description="Benchmark and validate poker solvers.")
     parser.add_argument(
         "--suite",
         choices=(
@@ -26,6 +29,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "mccfr-reference-convergence",
             "mccfr-validation",
             "mccfr-gate",
+            "deep-cfr-reference",
         ),
     )
     parser.add_argument("--output", type=Path)
@@ -65,10 +69,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 progress_callback=print,
             )
             result_label = "validation"
-        else:
+        elif arguments.suite == "mccfr-gate":
             output_directory = arguments.output or Path("results/mccfr")
             result_path = run_mccfr_gate(output_directory, progress_callback=print)
             result_label = "gate"
+        else:
+            output_directory = arguments.output or Path("results/deep_cfr")
+            result_path = run_deep_cfr_reference_validation(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "validation"
         print(f"{result_label}: {result_path}")
         return 0
 

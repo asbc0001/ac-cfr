@@ -1,0 +1,142 @@
+{
+  "about": "Machine-readable configuration and checks for multi-seed reference Deep CFR convergence on Leduc.",
+  "checks": [
+    {
+      "name": "every_seed_improves_over_the_declared_workload",
+      "passed": true,
+      "seed_exploitabilities": {
+        "20260810": {
+          "final": 0.726331720034584,
+          "initial": 3.948847504001495
+        },
+        "20260811": {
+          "final": 0.9298899882073398,
+          "initial": 3.9952071768389894
+        },
+        "20260812": {
+          "final": 0.8198643410387112,
+          "initial": 2.7574252241620982
+        },
+        "20260813": {
+          "final": 0.6679166658444006,
+          "initial": 1.7466321109897338
+        },
+        "20260814": {
+          "final": 0.9266070837023869,
+          "initial": 2.3593688307190384
+        }
+      }
+    },
+    {
+      "median_exploitabilities": [
+        2.7574252241620982,
+        1.9510496422300951,
+        1.0357131183712016,
+        0.8198643410387112
+      ],
+      "name": "median_exploitability_decreases_at_every_milestone",
+      "passed": true
+    }
+  ],
+  "configuration": {
+    "advantage_reservoir_capacity": 100000,
+    "advantage_training_epochs": 10,
+    "batch_size": 512,
+    "dropout_probability": 0.0,
+    "early_stopping": false,
+    "game": "leduc",
+    "learning_rate": 0.001,
+    "max_gradient_norm": 10.0,
+    "milestones": [
+      1,
+      5,
+      10,
+      20
+    ],
+    "outer_iterations": 20,
+    "seeds": [
+      20260810,
+      20260811,
+      20260812,
+      20260813,
+      20260814
+    ],
+    "solver": "naive_deep_cfr",
+    "strategy_reservoir_capacity": 100000,
+    "strategy_training_epochs": 20,
+    "tabular_reference_exploitability": 0.005,
+    "timed_region": "solver.train, including configured milestone strategy-network training",
+    "traversals_per_outer_iteration": 400,
+    "traversals_per_player_per_iteration": 200,
+    "validation_fraction": 0.1
+  },
+  "file_descriptions": {
+    "convergence": "Exact measurements for every seed and milestone snapshot.",
+    "plot": "Per-seed and median exact exploitability by iterations and time.",
+    "summary": "Median and complete seed range at each milestone."
+  },
+  "files": {
+    "convergence": "convergence.csv",
+    "plot": "plots/reference_convergence.png",
+    "summary": "summary.csv"
+  },
+  "passed": true,
+  "run_files": {
+    "20260810": {
+      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260810/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260810",
+      "snapshots": [
+        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_10.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_20.pt"
+      ]
+    },
+    "20260811": {
+      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260811/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260811",
+      "snapshots": [
+        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_10.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_20.pt"
+      ]
+    },
+    "20260812": {
+      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260812/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260812",
+      "snapshots": [
+        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_10.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_20.pt"
+      ]
+    },
+    "20260813": {
+      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260813/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260813",
+      "snapshots": [
+        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_10.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_20.pt"
+      ]
+    },
+    "20260814": {
+      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260814/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260814",
+      "snapshots": [
+        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_10.pt",
+        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_20.pt"
+      ]
+    }
+  },
+  "validation_id": "deep_cfr"
+}

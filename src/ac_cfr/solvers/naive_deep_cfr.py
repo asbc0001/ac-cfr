@@ -209,7 +209,7 @@ class NaiveDeepCFR:
         expected_snapshots = {
             snapshot_iteration
             for snapshot_iteration in self._config.snapshot_iterations
-            if snapshot_iteration <= iteration
+            if snapshot_iteration <= iteration and snapshot_iteration < self._config.iterations
         }
         if set(snapshot_networks) != expected_snapshots:
             raise ValueError("checkpoint milestone-network state is inconsistent")
@@ -240,7 +240,10 @@ class NaiveDeepCFR:
             self._run_player_update(player=1, iteration=current_iteration)
             self._iteration = current_iteration
 
-            if current_iteration in self._config.snapshot_iterations:
+            if (
+                current_iteration in self._config.snapshot_iterations
+                and current_iteration < self._config.iterations
+            ):
                 self._snapshot_networks[current_iteration] = self._train_strategy_network(
                     current_iteration
                 )
@@ -740,7 +743,10 @@ def _expected_metric_schedule(
                 (completed_iteration, "advantage", 1),
             )
         )
-        if completed_iteration in config.snapshot_iterations:
+        if (
+            completed_iteration in config.snapshot_iterations
+            and completed_iteration < config.iterations
+        ):
             schedule.append((completed_iteration, "strategy", None))
     if iteration == config.iterations:
         schedule.append((iteration, "strategy", None))

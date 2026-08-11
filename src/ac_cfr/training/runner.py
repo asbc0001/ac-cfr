@@ -2,7 +2,6 @@
 
 import json
 import re
-import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from math import isfinite
@@ -10,6 +9,7 @@ from pathlib import Path
 from secrets import token_hex
 from time import perf_counter
 
+from ac_cfr.common.provenance import code_revision
 from ac_cfr.common.rng import SeedDeriver
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId, UtilityUnit
@@ -168,8 +168,8 @@ def start_tabular_training(
     tabular_game = create_tabular_game(GameId(config.game))
     _warm_up_optimised_solver(config, tabular_game)
     solver = _create_solver(config, tabular_game)
-    code_revision = _code_revision()
-    _write_run_config(run_directory / "run_config.json", config, code_revision)
+    revision = code_revision()
+    _write_run_config(run_directory / "run_config.json", config, revision)
     result_store = TrainingMetricStore(run_directory / "metrics.csv")
     return _execute_schedule(
         config=config,
@@ -179,7 +179,7 @@ def start_tabular_training(
         result_store=result_store,
         elapsed_training_seconds=0.0,
         schedule_state=_ScheduleState(),
-        code_revision=code_revision,
+        code_revision=revision,
         progress_callback=progress_callback,
     )
 
@@ -220,7 +220,7 @@ def resume_tabular_training(
         result_store=result_store,
         elapsed_training_seconds=float(elapsed_training_seconds),
         schedule_state=schedule_state,
-        code_revision=_code_revision(),
+        code_revision=code_revision(),
         progress_callback=progress_callback,
     )
 
@@ -537,31 +537,6 @@ def _validate_run_config(path: Path, config: TabularTrainingConfig) -> None:
         raise ValueError("run_config.json is unreadable") from error
     if not isinstance(values, dict) or values.get("training_config") != config.to_dict():
         raise ValueError("run_config.json does not match the checkpoint")
-
-
-def _code_revision() -> str:
-    """Return the current Git revision or an explicit unavailable marker."""
-    try:
-        revision_result = subprocess.run(
-            ("git", "rev-parse", "HEAD"),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        status_result = subprocess.run(
-            ("git", "status", "--porcelain"),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-    revision = revision_result.stdout.strip()
-    if not revision:
-        return "unknown"
-    return f"{revision}-dirty" if status_result.stdout else revision
 
 
 def _validate_early_stopping(config: TabularTrainingConfig) -> None:

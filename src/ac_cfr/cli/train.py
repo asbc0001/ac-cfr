@@ -1,11 +1,21 @@
-"""Command-line entry point for checkpointed tabular poker training."""
+"""Command-line entry point for checkpointed poker-solver training."""
 
 import argparse
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from ac_cfr.evaluation.plotting import plot_training_diagnostics
-from ac_cfr.persistence.results import TrainingMetricStore
+from ac_cfr.evaluation.plotting import (
+    plot_deep_cfr_training_diagnostics,
+    plot_training_diagnostics,
+)
+from ac_cfr.persistence.results import DeepCFRMetricStore, TrainingMetricStore
+from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.deep_cfr_runner import (
+    DEEP_CFR_SOLVER_ID,
+    DeepCFRRunConfig,
+    resume_deep_cfr_training,
+    start_deep_cfr_training,
+)
 from ac_cfr.training.runner import (
     SOLVER_IDS,
     TabularTrainingConfig,
@@ -16,10 +26,13 @@ from ac_cfr.training.runner import (
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run or resume one configured tabular training job."""
+    """Run or resume one configured poker-solver training job."""
     parser = _parser()
     arguments = parser.parse_args(argv)
     report_progress = _progress_reporter()
+    is_deep_cfr = arguments.solver == DEEP_CFR_SOLVER_ID or (
+        arguments.resume is not None and arguments.resume.suffix == ".pt"
+    )
     if arguments.resume is not None:
         if any(
             value is not None
@@ -36,48 +49,85 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.averaging_delay,
                 arguments.early_stopping_minimum_improvement,
                 arguments.early_stopping_patience,
+                arguments.traversals_per_player,
+                arguments.advantage_reservoir_capacity,
+                arguments.strategy_reservoir_capacity,
+                arguments.advantage_training_epochs,
+                arguments.strategy_training_epochs,
+                arguments.batch_size,
+                arguments.learning_rate,
+                arguments.validation_fraction,
+                arguments.max_gradient_norm,
+                arguments.dropout_probability,
             )
         ):
             parser.error("--resume cannot be combined with new-run options")
-        outcome = resume_tabular_training(
-            arguments.resume,
-            progress_callback=report_progress,
+        outcome = (
+            resume_deep_cfr_training(arguments.resume, progress_callback=report_progress)
+            if is_deep_cfr
+            else resume_tabular_training(arguments.resume, progress_callback=report_progress)
         )
     else:
         if arguments.game is None or arguments.solver is None or arguments.iterations is None:
             parser.error("new training requires --game, --solver, and --iterations")
-        evaluation_interval = (
-            _interval_for_target_count(arguments.iterations, target_count=100)
-            if arguments.evaluation_interval is None
-            else arguments.evaluation_interval
-        )
-        checkpoint_interval = (
-            _interval_for_target_count(arguments.iterations, target_count=10)
-            if arguments.checkpoint_interval is None
-            else arguments.checkpoint_interval
-        )
         try:
             snapshots = _parse_iterations(arguments.snapshot_iterations)
         except ValueError as error:
             parser.error(str(error))
-        config = TabularTrainingConfig(
-            game=arguments.game,
-            solver=arguments.solver,
-            iterations=arguments.iterations,
-            seed=0 if arguments.seed is None else arguments.seed,
-            run_id=arguments.run_id or new_run_id(),
-            evaluation_interval=evaluation_interval,
-            checkpoint_interval=checkpoint_interval,
-            snapshot_iterations=snapshots,
-            averaging_delay=0 if arguments.averaging_delay is None else arguments.averaging_delay,
-            early_stopping_minimum_improvement=arguments.early_stopping_minimum_improvement,
-            early_stopping_patience=arguments.early_stopping_patience,
-        )
-        outcome = start_tabular_training(
-            config,
-            runs_root=Path("runs") if arguments.runs_root is None else arguments.runs_root,
-            progress_callback=report_progress,
-        )
+        if is_deep_cfr:
+            if arguments.game != "leduc":
+                parser.error("naive_deep_cfr supports only --game leduc")
+            if any(
+                value is not None
+                for value in (
+                    arguments.evaluation_interval,
+                    arguments.averaging_delay,
+                    arguments.early_stopping_minimum_improvement,
+                    arguments.early_stopping_patience,
+                )
+            ):
+                parser.error(
+                    "Deep CFR evaluates snapshots and does not use tabular evaluation, "
+                    "averaging, or early-stopping options"
+                )
+            deep_config = _deep_cfr_config(arguments, snapshots)
+            outcome = start_deep_cfr_training(
+                deep_config,
+                runs_root=Path("runs") if arguments.runs_root is None else arguments.runs_root,
+                progress_callback=report_progress,
+            )
+        else:
+            _reject_deep_cfr_options(parser, arguments)
+            evaluation_interval = (
+                _interval_for_target_count(arguments.iterations, target_count=100)
+                if arguments.evaluation_interval is None
+                else arguments.evaluation_interval
+            )
+            checkpoint_interval = (
+                _interval_for_target_count(arguments.iterations, target_count=10)
+                if arguments.checkpoint_interval is None
+                else arguments.checkpoint_interval
+            )
+            config = TabularTrainingConfig(
+                game=arguments.game,
+                solver=arguments.solver,
+                iterations=arguments.iterations,
+                seed=0 if arguments.seed is None else arguments.seed,
+                run_id=arguments.run_id or new_run_id(),
+                evaluation_interval=evaluation_interval,
+                checkpoint_interval=checkpoint_interval,
+                snapshot_iterations=snapshots,
+                averaging_delay=0
+                if arguments.averaging_delay is None
+                else arguments.averaging_delay,
+                early_stopping_minimum_improvement=arguments.early_stopping_minimum_improvement,
+                early_stopping_patience=arguments.early_stopping_patience,
+            )
+            outcome = start_tabular_training(
+                config,
+                runs_root=Path("runs") if arguments.runs_root is None else arguments.runs_root,
+                progress_callback=report_progress,
+            )
 
     print(f"run: {outcome.run_directory}")
     print(f"summary: {outcome.run_directory / 'summary.txt'}")
@@ -85,20 +135,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"checkpoint: {outcome.latest_checkpoint}")
     for snapshot_path in outcome.snapshot_paths:
         print(f"snapshot: {snapshot_path}")
-    _print_final_metrics(outcome.run_directory / "metrics.csv")
+    _print_final_metrics(outcome.run_directory / "metrics.csv", deep_cfr=is_deep_cfr)
     if arguments.plot:
         plot_path = outcome.run_directory / "plots" / "training_diagnostics.png"
-        plot_training_diagnostics(outcome.run_directory / "metrics.csv", plot_path)
+        if is_deep_cfr:
+            plot_deep_cfr_training_diagnostics(
+                outcome.run_directory / "metrics.csv",
+                plot_path,
+            )
+        else:
+            plot_training_diagnostics(outcome.run_directory / "metrics.csv", plot_path)
         print(f"plot: {plot_path}")
     return 0
 
 
 def _parser() -> argparse.ArgumentParser:
-    """Build the tabular training command-line parser."""
-    parser = argparse.ArgumentParser(description="Train a tabular poker solver.")
+    """Build the shared training command-line parser."""
+    parser = argparse.ArgumentParser(description="Train a poker solver.")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--game", choices=("kuhn", "leduc"))
-    parser.add_argument("--solver", choices=SOLVER_IDS)
+    parser.add_argument("--solver", choices=(*SOLVER_IDS, DEEP_CFR_SOLVER_ID))
     parser.add_argument("--iterations", type=int)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--run-id")
@@ -112,6 +168,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--averaging-delay", type=int)
     parser.add_argument("--early-stopping-minimum-improvement", type=float)
     parser.add_argument("--early-stopping-patience", type=int)
+    parser.add_argument("--traversals-per-player", type=int)
+    parser.add_argument("--advantage-reservoir-capacity", type=int)
+    parser.add_argument("--strategy-reservoir-capacity", type=int)
+    parser.add_argument("--advantage-training-epochs", type=int)
+    parser.add_argument("--strategy-training-epochs", type=int)
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--learning-rate", type=float)
+    parser.add_argument("--validation-fraction", type=float)
+    parser.add_argument("--max-gradient-norm", type=float)
+    parser.add_argument("--dropout-probability", type=float)
     parser.add_argument(
         "--plot",
         action="store_true",
@@ -152,11 +218,10 @@ def _progress_reporter() -> Callable[[int, int], None]:
     return report
 
 
-def _print_final_metrics(metrics_path: Path) -> None:
+def _print_final_metrics(metrics_path: Path, *, deep_cfr: bool) -> None:
     """Print the final exact metrics recorded for a completed run."""
-    records = tuple(
-        record for record in TrainingMetricStore(metrics_path).records if record["exploitability"]
-    )
+    store = DeepCFRMetricStore(metrics_path) if deep_cfr else TrainingMetricStore(metrics_path)
+    records = tuple(record for record in store.records if record["exploitability"])
     if not records:
         return
     final_record = max(records, key=lambda record: int(record["iteration"]))
@@ -166,3 +231,63 @@ def _print_final_metrics(metrics_path: Path) -> None:
     print(f"exploitability: {float(final_record['exploitability']):.12g}")
     print(f"solver training time: {float(final_record['elapsed_training_seconds']):.6g} seconds")
     print(f"average traversal throughput: {float(final_record['traversals_per_second']):.6g}/s")
+
+
+def _deep_cfr_config(
+    arguments: argparse.Namespace,
+    snapshots: tuple[int, ...],
+) -> DeepCFRRunConfig:
+    """Build a Deep CFR run configuration from explicit options and documented defaults."""
+    assert arguments.iterations is not None
+    defaults = {
+        "traversals_per_player": 200,
+        "advantage_reservoir_capacity": 100_000,
+        "strategy_reservoir_capacity": 100_000,
+        "advantage_training_epochs": 10,
+        "strategy_training_epochs": 20,
+        "batch_size": 512,
+        "learning_rate": 1e-3,
+        "validation_fraction": 0.1,
+        "max_gradient_norm": 10.0,
+        "dropout_probability": 0.0,
+    }
+    values = {
+        name: defaults[name] if getattr(arguments, name) is None else getattr(arguments, name)
+        for name in defaults
+    }
+    training = DeepCFRTrainingConfig(
+        iterations=arguments.iterations,
+        seed=0 if arguments.seed is None else arguments.seed,
+        snapshot_iterations=snapshots,
+        **values,
+    )
+    checkpoint_interval = (
+        _interval_for_target_count(arguments.iterations, target_count=10)
+        if arguments.checkpoint_interval is None
+        else arguments.checkpoint_interval
+    )
+    return DeepCFRRunConfig(
+        run_id=arguments.run_id or new_run_id(),
+        checkpoint_interval=checkpoint_interval,
+        training=training,
+    )
+
+
+def _reject_deep_cfr_options(
+    parser: argparse.ArgumentParser, arguments: argparse.Namespace
+) -> None:
+    """Reject neural-only options when a tabular solver was selected."""
+    names = (
+        "traversals_per_player",
+        "advantage_reservoir_capacity",
+        "strategy_reservoir_capacity",
+        "advantage_training_epochs",
+        "strategy_training_epochs",
+        "batch_size",
+        "learning_rate",
+        "validation_fraction",
+        "max_gradient_norm",
+        "dropout_probability",
+    )
+    if any(getattr(arguments, name) is not None for name in names):
+        parser.error("Deep CFR neural-training options require --solver naive_deep_cfr")

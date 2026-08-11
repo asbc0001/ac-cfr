@@ -25,6 +25,31 @@ TRAINING_METRIC_FIELDS: Final = (
 )
 TRAINING_METRIC_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
 
+DEEP_CFR_METRIC_FIELDS: Final = (
+    "game",
+    "game_version",
+    "utility_unit",
+    "solver",
+    "run_id",
+    "strategy_snapshot_id",
+    "source_checkpoint_id",
+    "iteration",
+    "seed",
+    "elapsed_training_seconds",
+    "expected_value_player_zero",
+    "exploitability",
+    "nash_conv",
+    "traversals",
+    "traversals_per_second",
+    "player_zero_advantage_training_loss",
+    "player_zero_advantage_validation_loss",
+    "player_one_advantage_training_loss",
+    "player_one_advantage_validation_loss",
+    "strategy_training_loss",
+    "strategy_validation_loss",
+)
+DEEP_CFR_METRIC_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
+
 EVALUATION_RESULT_FIELDS: Final = (
     "game",
     "game_version",
@@ -113,6 +138,32 @@ class EvaluationResultStore:
     def upsert(self, values: dict[str, object]) -> None:
         """Insert or replace one exact-evaluation result."""
         self._store.upsert(values)
+
+
+class DeepCFRMetricStore:
+    """Store periodic neural losses and exact Leduc strategy measurements."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, path: Path) -> None:
+        self._store = _CsvRecordStore(
+            path,
+            fields=DEEP_CFR_METRIC_FIELDS,
+            key_fields=DEEP_CFR_METRIC_KEY_FIELDS,
+        )
+
+    @property
+    def records(self) -> tuple[ResultRecord, ...]:
+        """Return independent copies of the current records."""
+        return self._store.records
+
+    def upsert(self, values: dict[str, object]) -> None:
+        """Insert or replace one Deep CFR training measurement."""
+        self._store.upsert(values)
+
+    def replace(self, records: list[dict[str, object]]) -> None:
+        """Replace all Deep CFR measurements after checkpoint validation."""
+        self._store.replace(records)
 
 
 class _CsvRecordStore:

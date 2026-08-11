@@ -3,6 +3,7 @@
 import pickle
 from dataclasses import dataclass
 from importlib.metadata import version
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ class LoadedDeepCFRCheckpoint:
 
     metadata: dict[str, Any]
     solver: NaiveDeepCFR
+    run_state: dict[str, Any]
 
 
 def save_deep_cfr_checkpoint(
@@ -45,6 +47,8 @@ def save_deep_cfr_checkpoint(
     run_id: str,
     checkpoint_id: str,
     code_revision: str,
+    elapsed_training_seconds: float = 0.0,
+    metric_records: tuple[dict[str, str], ...] = (),
 ) -> None:
     """Atomically save every value needed at a completed outer iteration."""
     if not isinstance(solver, NaiveDeepCFR):
@@ -56,6 +60,17 @@ def save_deep_cfr_checkpoint(
     ):
         if not isinstance(value, str) or not value:
             raise ValueError(f"{name} must be a non-empty string")
+    if (
+        isinstance(elapsed_training_seconds, bool)
+        or not isinstance(elapsed_training_seconds, (int, float))
+        or not isfinite(elapsed_training_seconds)
+        or elapsed_training_seconds < 0.0
+    ):
+        raise ValueError("elapsed_training_seconds must be finite and non-negative")
+    if not isinstance(metric_records, tuple) or any(
+        not isinstance(record, dict) for record in metric_records
+    ):
+        raise TypeError("metric_records must be a tuple of dictionaries")
 
     config = solver.config
     architecture = deep_cfr_network_config(
@@ -114,6 +129,10 @@ def save_deep_cfr_checkpoint(
         ),
         "rng_state": solver.training_rng_state(),
         "training_metrics": metrics,
+        "run_state": {
+            "elapsed_training_seconds": float(elapsed_training_seconds),
+            "metric_records": [record.copy() for record in metric_records],
+        },
     }
     with atomic_binary_writer(path) as checkpoint_file:
         torch.save(payload, checkpoint_file)
@@ -146,6 +165,7 @@ def load_deep_cfr_checkpoint(
         "strategy_reservoir",
         "rng_state",
         "training_metrics",
+        "run_state",
     }:
         raise ValueError("Deep CFR checkpoint fields are incomplete or unexpected")
 
@@ -163,6 +183,7 @@ def load_deep_cfr_checkpoint(
     iteration = metadata["iteration"]
     metrics = _load_metrics(payload["training_metrics"])
     _validate_logger_state(metadata["metric_logger_state"], metrics)
+    _validate_run_state(payload["run_state"], metadata)
     advantage_networks = _load_advantage_networks(payload["advantage_networks"], config)
     snapshot_networks = _load_snapshot_networks(payload["snapshot_networks"], config)
     final_strategy_network = _load_network(
@@ -201,7 +222,11 @@ def load_deep_cfr_checkpoint(
         chance_rng_state=rng_state["chance"],
         policy_rng_state=rng_state["policy"],
     )
-    return LoadedDeepCFRCheckpoint(metadata=metadata, solver=solver)
+    return LoadedDeepCFRCheckpoint(
+        metadata=metadata,
+        solver=solver,
+        run_state=payload["run_state"],
+    )
 
 
 def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
@@ -265,7 +290,9 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
             raise ValueError(f"Deep CFR checkpoint has incompatible {field_name}")
     expected_schedule = {
         "completed_snapshot_iterations": [
-            item for item in config.snapshot_iterations if item <= iteration
+            item
+            for item in config.snapshot_iterations
+            if item <= iteration and item < config.iterations
         ],
         "final_strategy_network_trained": iteration == config.iterations,
     }
@@ -561,3 +588,37 @@ def _validate_logger_state(
     }
     if value != expected:
         raise ValueError("Deep CFR checkpoint metric logger state is inconsistent")
+
+
+def _validate_run_state(value: object, metadata: dict[str, Any]) -> None:
+    """Validate resume-safe elapsed time and compact periodic metric records."""
+    if not isinstance(value, dict) or set(value) != {
+        "elapsed_training_seconds",
+        "metric_records",
+    }:
+        raise ValueError("Deep CFR checkpoint run state is incomplete or unexpected")
+    elapsed = value["elapsed_training_seconds"]
+    if (
+        isinstance(elapsed, bool)
+        or not isinstance(elapsed, (int, float))
+        or not isfinite(elapsed)
+        or elapsed < 0.0
+    ):
+        raise ValueError("Deep CFR checkpoint elapsed training time is invalid")
+    records = value["metric_records"]
+    if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+        raise ValueError("Deep CFR checkpoint metric records are invalid")
+    for record in records:
+        try:
+            run_id = record["run_id"]
+            iteration = int(record["iteration"])
+            seed = int(record["seed"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Deep CFR checkpoint metric record is invalid") from error
+        if (
+            run_id != metadata["run_id"]
+            or iteration < 1
+            or iteration > metadata["iteration"]
+            or seed != metadata["training_config"]["seed"]
+        ):
+            raise ValueError("Deep CFR checkpoint metric record is inconsistent")
