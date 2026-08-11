@@ -1,0 +1,28 @@
+format_version = 1
+
+[run]
+implementation = "optimised"
+checkpoint_interval = 50
+
+[training]
+iterations = 150
+traversals_per_player = 1000
+advantage_reservoir_capacity = 100000
+strategy_reservoir_capacity = 100000
+advantage_training_steps = 1000
+strategy_training_steps = 1000
+training_batch_size = 512
+learning_rate = 0.001
+validation_fraction = 0.1
+max_gradient_norm = 1.0
+dropout_probability = 0.0
+seed = 20260811
+snapshot_iterations = [1, 20, 50, 100]
+model_config_id = "leduc_deep_cfr"
+state_encoding_id = "leduc_neural"
+optimizer_id = "adam"
+
+[runtime]
+inference_batch_size = 512
+cpu_threads = 1
+device = "cpu"

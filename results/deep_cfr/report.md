@@ -4,7 +4,7 @@
 - **Matched implementation convergence:** PASS
 - **Implementation profiling and benchmark:** COMPLETE
 - **Bounded configuration selection:** COMPLETE
-- **Selected-configuration validation:** PASS
+- **Training lifecycle validation:** PASS
 
 ## Scope
 
@@ -34,7 +34,7 @@ Both implementations improve along closely matched trajectories. Their final exp
 
 These short validation policies remain far above the validated tabular ceiling of `0.005` chips per hand. They establish correct learning behaviour, not final Deep CFR capability.
 
-## Configuration selection
+## Initial configuration study
 
 Six optimised runs changed one factor at a time over 20 outer iterations. This is a bounded sensitivity check, not an exhaustive search or a claim that the selected values are optimal.
 
@@ -53,9 +53,9 @@ Baseline training and held-out losses remained close, so this run showed no clea
 
 The longer validation then exposed a limitation the 20-iteration study could not: with 100 advantage updates, exploitability improved to 1.0711 at iteration 20 but worsened to 1.3728 by iteration 100 while advantage training and held-out losses rose together. A bounded 50-iteration diagnostic showed that 200 updates sustained learning, so `leduc_selected.toml` was corrected to 200 advantage updates without changing `K`, model size, learning rate or other settings.
 
-## Selected-configuration validation
+## Training lifecycle validation
 
-Three optimised seeds used the corrected selected settings through iteration 20. Every seed improved, and median exact exploitability fell from 3.2883 to 1.0484 chips.
+Three optimised seeds used the interim 200-update settings through iteration 20. Every seed improved, and median exact exploitability fell from 3.2883 to 1.0484 chips.
 
 | Seed | Iteration 1 | Iteration 20 |
 |---:|---:|---:|
@@ -72,9 +72,20 @@ The moderate seed was deliberately interrupted after its iteration-20 checkpoint
 | 50 | 50.15 s | 1.0507 |
 | 100 | 98.04 s | 0.9013 |
 
-The corrected setup passed the sustained-learning gate: iteration-100 exploitability was lower than at iteration 20, and final advantage losses also fell. The moderate run resumed successfully from its intentional iteration-20 interruption. All eight exported snapshots reloaded and matched `NeuralAgent` probabilities across every Leduc information set within `1e-6`.
+At this stage, iteration-100 exploitability was lower than at iteration 20 and final advantage losses had also fallen. The moderate run resumed successfully from its intentional iteration-20 interruption, and all eight exported snapshots matched `NeuralAgent` probabilities across every Leduc information set within `1e-6`. This validated the complete training lifecycle, but later diagnostics showed that the neural-training budgets were still too small for the final policy.
 
-This validates the selected setup before the separate, longer final-policy run; these validation snapshots are not presented as the final web policy.
+## Final-configuration precheck
+
+Longer diagnostics showed that the earlier 200-step advantage and strategy budgets undertrained the neural approximations. The final preset therefore uses 1,000 advantage updates per player and 1,000 updates per exported strategy network, with gradient clipping reduced from 10.0 to 1.0. It retains 1,000 traversals per player, the 64-unit network and the existing reservoir, batch-size and learning-rate settings.
+
+Two independent 20-iteration checks confirmed the revised configuration learns consistently before the final run:
+
+| Seed | Iteration 1 exploitability | Iteration 20 exploitability | Training time |
+|---:|---:|---:|---:|
+| 20260810 | 4.0035 | 0.3775 | 74.60 s |
+| 20260812 | 1.6933 | 0.4401 | 77.27 s |
+
+All recorded losses were finite, and final training and held-out losses remained comparable. A separate 150-iteration diagnostic reached 0.2295 exact exploitability; its weighted strategy reservoir reached 0.1910. Doubling the hidden-layer width did not improve the exported strategy, so the final preset retains the leaner 64-unit architecture. These checks select a reasonable configuration; they are not the final policy run.
 
 ## Engineering results
 
@@ -101,5 +112,6 @@ Reference runs exported independently loadable policies at iterations 1, 5 and 1
 - `profiling.json` and `profiles/` contain the diagnostic workloads and profiles.
 - `configuration_study.json`, `configuration_study.csv`, and `plots/configuration_sensitivity.png` contain the bounded configuration study.
 - `selected_validation.json`, `selected_convergence.csv`, and `plots/selected_validation.png` contain the selected-configuration lifecycle check.
+- `final_configuration_checks.csv` contains the two short checks of the frozen final preset.
 
 Large checkpoints and neural snapshots remain under ignored `runs/` directories.
