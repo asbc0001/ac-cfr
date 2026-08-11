@@ -1,0 +1,159 @@
+{
+  "about": "Machine-readable checks and file index for the selected optimised Leduc Deep CFR validation preceding final-policy training.",
+  "checks": [
+    {
+      "name": "every_short_seed_improves_from_iteration_1_to_20",
+      "passed": true,
+      "seed_exploitabilities": {
+        "20260810": {
+          "final": 1.0696513920774169,
+          "initial": 4.044082775319385
+        },
+        "20260811": {
+          "final": 1.048401280378448,
+          "initial": 3.288334660547379
+        },
+        "20260812": {
+          "final": 0.9351300270146193,
+          "initial": 1.695805906023999
+        }
+      }
+    },
+    {
+      "final_median_exploitability": 1.048401280378448,
+      "initial_median_exploitability": 3.288334660547379,
+      "name": "short_seed_median_exploitability_improves",
+      "passed": true
+    },
+    {
+      "iteration_100_exploitability": 0.9012583297949477,
+      "iteration_20_exploitability": 1.048401280378448,
+      "name": "moderate_run_improves_from_iteration_20_to_100",
+      "passed": true
+    },
+    {
+      "interruption_iteration": 20,
+      "name": "selected_run_checkpoint_resume_completed",
+      "passed": true
+    },
+    {
+      "absolute_tolerance": 1e-06,
+      "maximum_probability_difference": 3.5762786865234375e-07,
+      "name": "all_snapshots_match_neural_agent_probabilities",
+      "passed": true
+    }
+  ],
+  "configuration": {
+    "implementation": "optimised",
+    "interruption_iteration": 20,
+    "main_milestones": [
+      1,
+      20,
+      50,
+      100
+    ],
+    "main_seed": 20260811,
+    "runtime": {
+      "cpu_threads": 1,
+      "device": "cpu",
+      "inference_batch_size": 512
+    },
+    "short_milestones": [
+      1,
+      20
+    ],
+    "short_seeds": [
+      20260810,
+      20260812,
+      20260811
+    ],
+    "snapshot_reproduction_absolute_tolerance": 1e-08,
+    "timed_region": "solver.train, including configured milestone strategy-network training",
+    "training": {
+      "advantage_reservoir_capacity": 100000,
+      "advantage_training_steps": 200,
+      "dropout_probability": 0.0,
+      "iterations": 100,
+      "learning_rate": 0.001,
+      "max_gradient_norm": 10.0,
+      "model_config_id": "leduc_deep_cfr",
+      "optimizer_id": "adam",
+      "seed": 20260811,
+      "snapshot_iterations": [
+        1,
+        20,
+        50
+      ],
+      "state_encoding_id": "leduc_neural",
+      "strategy_reservoir_capacity": 100000,
+      "strategy_training_steps": 200,
+      "training_batch_size": 512,
+      "traversals_per_player": 1000,
+      "validation_fraction": 0.1
+    }
+  },
+  "file_descriptions": {
+    "convergence": "Exact measurements and neural losses for every snapshot.",
+    "plot": "Multi-seed learning and moderate-run loss diagnostics."
+  },
+  "files": {
+    "convergence": "selected_convergence.csv",
+    "plot": "plots/selected_validation.png"
+  },
+  "passed": true,
+  "run_files": {
+    "20260810": {
+      "code_revision": "2d402717049155bbbf9e63d2e4d547fa1e5650b9",
+      "latest_checkpoint": "runs/leduc-deep-cfr-selected-short-a200-seed-20260810/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-deep-cfr-selected-short-a200-seed-20260810",
+      "snapshots": [
+        "runs/leduc-deep-cfr-selected-short-a200-seed-20260810/strategy_snapshots/leduc-deep-cfr-selected-short-a200-seed-20260810_iter_1.pt",
+        "runs/leduc-deep-cfr-selected-short-a200-seed-20260810/strategy_snapshots/leduc-deep-cfr-selected-short-a200-seed-20260810_iter_20.pt"
+      ]
+    },
+    "20260811": {
+      "code_revision": "2d402717049155bbbf9e63d2e4d547fa1e5650b9",
+      "latest_checkpoint": "runs/leduc-deep-cfr-selected-a200-seed-20260811/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-deep-cfr-selected-a200-seed-20260811",
+      "snapshots": [
+        "runs/leduc-deep-cfr-selected-a200-seed-20260811/strategy_snapshots/leduc-deep-cfr-selected-a200-seed-20260811_iter_1.pt",
+        "runs/leduc-deep-cfr-selected-a200-seed-20260811/strategy_snapshots/leduc-deep-cfr-selected-a200-seed-20260811_iter_20.pt",
+        "runs/leduc-deep-cfr-selected-a200-seed-20260811/strategy_snapshots/leduc-deep-cfr-selected-a200-seed-20260811_iter_50.pt",
+        "runs/leduc-deep-cfr-selected-a200-seed-20260811/strategy_snapshots/leduc-deep-cfr-selected-a200-seed-20260811_iter_100.pt"
+      ]
+    },
+    "20260812": {
+      "code_revision": "2d402717049155bbbf9e63d2e4d547fa1e5650b9",
+      "latest_checkpoint": "runs/leduc-deep-cfr-selected-short-a200-seed-20260812/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-deep-cfr-selected-short-a200-seed-20260812",
+      "snapshots": [
+        "runs/leduc-deep-cfr-selected-short-a200-seed-20260812/strategy_snapshots/leduc-deep-cfr-selected-short-a200-seed-20260812_iter_1.pt",
+        "runs/leduc-deep-cfr-selected-short-a200-seed-20260812/strategy_snapshots/leduc-deep-cfr-selected-short-a200-seed-20260812_iter_20.pt"
+      ]
+    }
+  },
+  "selected_preset": "configs/deep_cfr/leduc_selected.toml",
+  "short_seed_summary": [
+    {
+      "iteration": 1,
+      "maximum_exploitability": 4.044082775319385,
+      "median_elapsed_training_seconds": 1.1641036820074078,
+      "median_exploitability": 3.288334660547379,
+      "median_nash_conv": 6.576669321094758,
+      "minimum_exploitability": 1.695805906023999,
+      "seed_count": 3,
+      "validation_id": "deep_cfr_selected"
+    },
+    {
+      "iteration": 20,
+      "maximum_exploitability": 1.0696513920774169,
+      "median_elapsed_training_seconds": 19.28700415500498,
+      "median_exploitability": 1.048401280378448,
+      "median_nash_conv": 2.096802560756896,
+      "minimum_exploitability": 0.9351300270146193,
+      "seed_count": 3,
+      "validation_id": "deep_cfr_selected"
+    }
+  ],
+  "validation_id": "deep_cfr_selected"
+}

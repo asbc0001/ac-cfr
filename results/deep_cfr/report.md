@@ -4,10 +4,11 @@
 - **Matched implementation convergence:** PASS
 - **Implementation profiling and benchmark:** COMPLETE
 - **Bounded configuration selection:** COMPLETE
+- **Selected-configuration validation:** PASS
 
 ## Scope
 
-These results validate Deep CFR learning, compare the reference and optimised implementations, and select a bounded Leduc configuration. The selected setup has not yet undergone the moderate multi-seed validation stage.
+These results validate Deep CFR learning, compare the reference and optimised implementations, and select a bounded Leduc configuration for final-policy training.
 
 Training uses fixed minibatch-update budgets sampled uniformly from the reservoirs, so neural-training cost does not grow automatically with reservoir size.
 
@@ -46,11 +47,34 @@ Six optimised runs changed one factor at a time over 20 outer iterations. This i
 | 200 advantage updates | 100 to 200 steps | 21.01 s | 1.0484 |
 | Smaller network | 64 to 32 units per hidden layer | 12.72 s | 1.6884 |
 
-Halving the advantage-training budget and shrinking the network materially reduced strategy quality. Raising the advantage budget to 150 or 200 steps improved this seed's exploitability by only 0.043 and 0.023 chips while increasing training time by 34% and 63%; 200 steps was also slightly worse than 150. The lower-K result was slightly better for this one seed, but one stochastic run does not show that half as many samples remains sufficient over longer training, and the saving was only 2.25 seconds. The selected Leduc configuration therefore retains `K = 1,000`, 100 advantage-training steps and the 64-unit network.
+Halving the advantage-training budget and shrinking the network materially reduced strategy quality. At 20 iterations, raising the advantage budget to 150 or 200 steps gave only a small improvement for extra cost, so the initial selected setup retained 100 steps. The lower-K result was slightly better for this one seed, but one stochastic run does not show that half as many samples remains sufficient over longer training.
 
 Baseline training and held-out losses remained close, so this run showed no clear conventional overfitting. Packed reservoirs used 50.2 MB; trained network parameters used about 131 KB, meaning the smaller network would not materially reduce total memory while reservoir storage dominates.
 
-`leduc_selected.toml` freezes these learning settings for the next validation stage. Its 100-iteration budget and early/intermediate snapshots define the moderate validation run rather than another tuning variable.
+The longer validation then exposed a limitation the 20-iteration study could not: with 100 advantage updates, exploitability improved to 1.0711 at iteration 20 but worsened to 1.3728 by iteration 100 while advantage training and held-out losses rose together. A bounded 50-iteration diagnostic showed that 200 updates sustained learning, so `leduc_selected.toml` was corrected to 200 advantage updates without changing `K`, model size, learning rate or other settings.
+
+## Selected-configuration validation
+
+Three optimised seeds used the corrected selected settings through iteration 20. Every seed improved, and median exact exploitability fell from 3.2883 to 1.0484 chips.
+
+| Seed | Iteration 1 | Iteration 20 |
+|---:|---:|---:|
+| 20260810 | 4.0441 | 1.0697 |
+| 20260811 | 3.2883 | 1.0484 |
+| 20260812 | 1.6958 | 0.9351 |
+
+The moderate seed was deliberately interrupted after its iteration-20 checkpoint and successfully resumed. Its later exact results were:
+
+| Iteration | Training time | Exact exploitability |
+|---:|---:|---:|
+| 1 | 1.16 s | 3.2883 |
+| 20 | 19.29 s | 1.0484 |
+| 50 | 50.15 s | 1.0507 |
+| 100 | 98.04 s | 0.9013 |
+
+The corrected setup passed the sustained-learning gate: iteration-100 exploitability was lower than at iteration 20, and final advantage losses also fell. The moderate run resumed successfully from its intentional iteration-20 interruption. All eight exported snapshots reloaded and matched `NeuralAgent` probabilities across every Leduc information set within `1e-6`.
+
+This validates the selected setup before the separate, longer final-policy run; these validation snapshots are not presented as the final web policy.
 
 ## Engineering results
 
@@ -76,5 +100,6 @@ Reference runs exported independently loadable policies at iterations 1, 5 and 1
 - `benchmark.json`, `benchmark_*.csv`, and `plots/implementation_performance.png` contain the performance evidence.
 - `profiling.json` and `profiles/` contain the diagnostic workloads and profiles.
 - `configuration_study.json`, `configuration_study.csv`, and `plots/configuration_sensitivity.png` contain the bounded configuration study.
+- `selected_validation.json`, `selected_convergence.csv`, and `plots/selected_validation.png` contain the selected-configuration lifecycle check.
 
 Large checkpoints and neural snapshots remain under ignored `runs/` directories.
