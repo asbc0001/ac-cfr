@@ -28,7 +28,11 @@ class StateEncodingId(StrEnum):
 class ModelConfigId(StrEnum):
     """Identifiers for reconstructable neural-network configurations."""
 
-    LEDUC_DEEP_CFR = "leduc_deep_cfr"
+    LEDUC_DEEP_CFR_BASELINE = "leduc_deep_cfr"
+    LEDUC_DEEP_CFR_SMALL = "leduc_deep_cfr_small"
+
+    # Retain the original name for existing checkpoints and snapshots.
+    LEDUC_DEEP_CFR = LEDUC_DEEP_CFR_BASELINE
 
 
 class OptimizerId(StrEnum):

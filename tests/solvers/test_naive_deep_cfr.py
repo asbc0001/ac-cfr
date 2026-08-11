@@ -16,13 +16,18 @@ from ac_cfr.solvers.naive_deep_cfr import (
     deep_cfr_regret_matching,
     linear_cfr_loss,
 )
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import UniformReservoir
 
 
 class _ObservedNaiveDeepCFR(NaiveDeepCFR):
-    def __init__(self, tree: IndexedGameTree, config: DeepCFRTrainingConfig) -> None:
-        super().__init__(tree, config)
+    def __init__(
+        self,
+        tree: IndexedGameTree,
+        config: DeepCFRTrainingConfig,
+        runtime: DeepCFRRuntimeConfig,
+    ) -> None:
+        super().__init__(tree, config, runtime)
         self.update_observations: list[tuple[int, bool, bool]] = []
 
     def _run_player_update(self, player: int, iteration: int) -> None:
@@ -91,7 +96,7 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
         strategy_reservoir_capacity=100,
         advantage_training_steps=1,
         strategy_training_steps=1,
-        batch_size=128,
+        training_batch_size=128,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -99,7 +104,11 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
         seed=2026,
         snapshot_iterations=(1,),
     )
-    solver = _ObservedNaiveDeepCFR(tree, config)
+    solver = _ObservedNaiveDeepCFR(
+        tree,
+        config,
+        DeepCFRRuntimeConfig(inference_batch_size=64, cpu_threads=1, device="cpu"),
+    )
     player_zero_information_set = int(np.flatnonzero(tree.information_set_players == 0)[0])
 
     initial_strategy = solver.strategy_for_information_set(player_zero_information_set, 0)

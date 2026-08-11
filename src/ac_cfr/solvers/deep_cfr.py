@@ -23,7 +23,7 @@ from ac_cfr.solvers.naive_deep_cfr import (
     _network_seed_index,
     _train_network_tensors,
 )
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import PackedAdvantageReservoir, PackedStrategyReservoir
 
 
@@ -49,8 +49,14 @@ _Traversal = Generator[_InferenceRequest, NDArray[np.float64], float]
 class DeepCFR(NaiveDeepCFR):
     """Deep CFR with concurrent trajectories, batched inference, and packed memory."""
 
-    def __init__(self, tree: IndexedGameTree, config: DeepCFRTrainingConfig) -> None:
-        super().__init__(tree, config)
+    def __init__(
+        self,
+        tree: IndexedGameTree,
+        config: DeepCFRTrainingConfig,
+        runtime: DeepCFRRuntimeConfig,
+    ) -> None:
+        super().__init__(tree, config, runtime)
+        self._inference_batch_size = runtime.inference_batch_size
         warm_up_probabilities = np.asarray((0.5, 0.5), dtype=np.float64)
         _single_positive_position(warm_up_probabilities)
         _sample_position_from_draw(warm_up_probabilities, 0.0)
@@ -98,8 +104,15 @@ class DeepCFR(NaiveDeepCFR):
 
     def _collect_player_traversals(self, player: int, iteration: int) -> None:
         """Advance K independent sampled traversals in inference batches."""
-        for start in range(0, self.config.traversals_per_player, self.config.batch_size):
-            stop = min(start + self.config.batch_size, self.config.traversals_per_player)
+        for start in range(
+            0,
+            self.config.traversals_per_player,
+            self._inference_batch_size,
+        ):
+            stop = min(
+                start + self._inference_batch_size,
+                self.config.traversals_per_player,
+            )
             traversals = [
                 self._traverse_batched(
                     node_id=0,
@@ -336,7 +349,7 @@ class DeepCFR(NaiveDeepCFR):
             sample_iterations=torch.from_numpy(sample_iterations.astype(np.float32)),
             current_iteration=iteration,
             training_steps=training_steps,
-            batch_size=self.config.batch_size,
+            batch_size=self.config.training_batch_size,
             learning_rate=self.config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),

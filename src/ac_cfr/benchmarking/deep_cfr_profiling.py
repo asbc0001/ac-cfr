@@ -2,28 +2,21 @@
 
 import cProfile
 import io
-import json
-import os
-import platform
 import pstats
-import subprocess
-import sys
 from collections.abc import Callable
-from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
 from typing import Final
 
-import psutil
-import torch
 from torch.profiler import ProfilerActivity, profile
 
+from ac_cfr.benchmarking.harness import environment_record, report_progress
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
-from ac_cfr.persistence.files import atomic_text_writer
+from ac_cfr.persistence.files import atomic_text_writer, write_json
 from ac_cfr.solvers import DeepCFR, NaiveDeepCFR
 from ac_cfr.solvers.naive_deep_cfr import NetworkTrainingMetrics
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 
 PROFILE_ID = "deep_cfr"
 PROFILE_ITERATIONS = 3
@@ -54,14 +47,14 @@ def run_deep_cfr_profiling(
     files: dict[str, dict[str, str]] = {}
 
     for implementation, solver_type in _IMPLEMENTATIONS:
-        _report(progress_callback, f"warm-up: {implementation} Deep CFR")
+        report_progress(progress_callback, f"warm-up: {implementation} Deep CFR")
         _warm_up(solver_type)
 
-        _report(progress_callback, f"cProfile: {implementation} Deep CFR")
+        report_progress(progress_callback, f"cProfile: {implementation} Deep CFR")
         cpu_path, cpu_record = _write_cpu_profile(profile_directory, implementation, solver_type)
         records.append(cpu_record)
 
-        _report(progress_callback, f"torch.profiler: {implementation} Deep CFR")
+        report_progress(progress_callback, f"torch.profiler: {implementation} Deep CFR")
         torch_path, torch_record = _write_torch_profile(
             profile_directory,
             implementation,
@@ -74,7 +67,7 @@ def run_deep_cfr_profiling(
         }
 
     result_path = output_directory / "profiling.json"
-    _write_json(
+    write_json(
         result_path,
         {
             "about": (
@@ -91,7 +84,7 @@ def run_deep_cfr_profiling(
                 "profiles_run_separately": True,
                 "formal_timing": False,
             },
-            "environment": _environment_record(),
+            "environment": environment_record("torch", "numpy", "numba", "psutil", device="cpu"),
             "runs": records,
             "files": files,
             "file_descriptions": {
@@ -112,7 +105,7 @@ def _profile_config() -> DeepCFRTrainingConfig:
         strategy_reservoir_capacity=100_000,
         advantage_training_steps=PROFILE_ADVANTAGE_TRAINING_STEPS,
         strategy_training_steps=PROFILE_STRATEGY_TRAINING_STEPS,
-        batch_size=512,
+        training_batch_size=512,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -130,7 +123,7 @@ def _torch_profile_config() -> DeepCFRTrainingConfig:
         strategy_reservoir_capacity=100_000,
         advantage_training_steps=TORCH_PROFILE_ADVANTAGE_TRAINING_STEPS,
         strategy_training_steps=TORCH_PROFILE_STRATEGY_TRAINING_STEPS,
-        batch_size=512,
+        training_batch_size=512,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -148,14 +141,14 @@ def _warm_up(solver_type: type[NaiveDeepCFR]) -> None:
         strategy_reservoir_capacity=1_000,
         advantage_training_steps=2,
         strategy_training_steps=2,
-        batch_size=32,
+        training_batch_size=32,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
         dropout_probability=0.0,
         seed=PROFILE_SEED,
     )
-    solver_type(_tree(), config).train(1)
+    solver_type(_tree(), config, _runtime_config(inference_batch_size=32)).train(1)
 
 
 def _write_cpu_profile(
@@ -164,7 +157,7 @@ def _write_cpu_profile(
     solver_type: type[NaiveDeepCFR],
 ) -> tuple[Path, dict[str, object]]:
     """Run one cProfile diagnostic and save its most costly call paths."""
-    solver = solver_type(_tree(), _profile_config())
+    solver = solver_type(_tree(), _profile_config(), _runtime_config())
     profiler = cProfile.Profile()
     started = perf_counter()
     profiler.runcall(solver.train, PROFILE_ITERATIONS)
@@ -200,7 +193,7 @@ def _write_torch_profile(
     solver_type: type[NaiveDeepCFR],
 ) -> tuple[Path, dict[str, object]]:
     """Run one torch.profiler diagnostic and save its leading operators."""
-    solver = solver_type(_tree(), _torch_profile_config())
+    solver = solver_type(_tree(), _torch_profile_config(), _runtime_config())
     with profile(activities=[ProfilerActivity.CPU]) as profiler:
         solver.train(TORCH_PROFILE_ITERATIONS)
     table = profiler.key_averages().table(
@@ -263,65 +256,10 @@ def _tree() -> IndexedGameTree:
     return compile_game_tree(LeducGame(), LeducConfig())
 
 
-def _environment_record() -> dict[str, object]:
-    """Describe CPU, memory, PyTorch, and visible WSL resource controls."""
-    memory = psutil.virtual_memory()
-    process = psutil.Process()
-    wsl_configs = sorted(Path("/mnt/c/Users").glob("*/.wslconfig"))
-    return {
-        "platform": platform.platform(),
-        "machine": platform.machine(),
-        "processor": platform.processor(),
-        "python": platform.python_version(),
-        "pytorch": torch.__version__,
-        "numpy": version("numpy"),
-        "numba": version("numba"),
-        "psutil": version("psutil"),
-        "executable": sys.executable,
-        "code_revision": _code_revision(),
-        "device": "cpu",
-        "logical_cpu_count": os.cpu_count(),
-        "physical_cpu_count": psutil.cpu_count(logical=False),
-        "available_cpu_count": (
-            len(process.cpu_affinity()) if hasattr(process, "cpu_affinity") else None
-        ),
-        "available_memory_bytes": memory.available,
-        "total_memory_bytes": memory.total,
-        "wsl2": "microsoft-standard-WSL2" in platform.release(),
-        "wslconfig_files": [str(path) for path in wsl_configs],
-        "wslconfig_observation": (
-            "No host .wslconfig was visible; no explicit user CPU or memory cap was found."
-            if not wsl_configs
-            else "Host .wslconfig files exist and should be reviewed alongside this record."
-        ),
-    }
-
-
-def _code_revision() -> str:
-    """Return the current commit hash with a marker for uncommitted changes."""
-    revision = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    dirty = subprocess.run(
-        ("git", "status", "--porcelain"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return f"{revision}-dirty" if dirty else revision
-
-
-def _write_json(path: Path, value: object) -> None:
-    """Write stable machine-readable profiling metadata atomically."""
-    with atomic_text_writer(path) as output_file:
-        json.dump(value, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
-
-
-def _report(callback: Callable[[str], None] | None, message: str) -> None:
-    """Send a profiling progress message when requested."""
-    if callback is not None:
-        callback(message)
+def _runtime_config(*, inference_batch_size: int = 512) -> DeepCFRRuntimeConfig:
+    """Return the explicit CPU execution settings used while profiling."""
+    return DeepCFRRuntimeConfig(
+        inference_batch_size=inference_batch_size,
+        cpu_threads=1,
+        device="cpu",
+    )

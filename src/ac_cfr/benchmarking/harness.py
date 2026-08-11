@@ -1,13 +1,19 @@
 """Repeated fixed-workload timings for tabular poker solvers."""
 
+import platform
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.metadata import version
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
+from pathlib import Path
 from statistics import median
 from time import perf_counter
 
 import psutil
 
+from ac_cfr.common.provenance import code_revision
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import create_tabular_game
@@ -56,6 +62,74 @@ class BenchmarkResult:
     repeat_results: tuple[BenchmarkRepeat, ...]
 
 
+def environment_record(
+    *packages: str,
+    device: str | None = None,
+) -> dict[str, object]:
+    """Return consistent hardware, software, and source provenance metadata."""
+    process = psutil.Process()
+    is_wsl2 = "microsoft" in platform.release().lower()
+    record: dict[str, object] = {
+        "code_revision": code_revision(),
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "logical_cpu_count": psutil.cpu_count(logical=True),
+        "physical_cpu_count": psutil.cpu_count(logical=False),
+        "available_cpu_count": (
+            len(process.cpu_affinity()) if hasattr(process, "cpu_affinity") else None
+        ),
+        "available_memory_bytes": psutil.virtual_memory().available,
+        "total_memory_bytes": psutil.virtual_memory().total,
+        "wsl2": is_wsl2,
+        "wsl_config_paths": (
+            sorted(str(path) for path in Path("/mnt/c/Users").glob("*/.wslconfig"))
+            if is_wsl2
+            else []
+        ),
+        "executable": sys.executable,
+    }
+    record.update((package, version(package)) for package in packages)
+    if device is not None:
+        record["device"] = device
+    return record
+
+
+def report_progress(callback: Callable[[str], None] | None, message: str) -> None:
+    """Send a progress message when the caller supplied a callback."""
+    if callback is not None:
+        callback(message)
+
+
+def median_absolute_deviation(values: tuple[float, ...]) -> float:
+    """Return the median distance from the sample median."""
+    centre = median(values)
+    return median(abs(value - centre) for value in values)
+
+
+def preferred_memory_metric() -> str:
+    """Prefer proportional memory, then unique memory, then resident memory."""
+    memory = psutil.Process().memory_full_info()
+    if hasattr(memory, "pss"):
+        return "pss"
+    if hasattr(memory, "uss"):
+        return "uss"
+    return "rss"
+
+
+def process_tree_memory_bytes(process: psutil.Process, metric: str) -> int:
+    """Sum one memory measure across a process and its children."""
+    total = 0
+    for member in (process, *process.children(recursive=True)):
+        try:
+            memory = member.memory_full_info()
+        except (psutil.AccessDenied, psutil.NoSuchProcess):
+            continue
+        total += int(getattr(memory, metric))
+    return total
+
+
 def run_tabular_benchmark(
     *,
     game: str,
@@ -82,7 +156,7 @@ def run_tabular_benchmark(
     ):
         raise ValueError("memory_sampling_interval_seconds must be positive")
 
-    memory_metric = _preferred_memory_metric()
+    memory_metric = preferred_memory_metric()
     repeat_results: list[BenchmarkRepeat] = []
     final_metrics: tuple[float, float, float] | None = None
     traversals = 2 * iterations
@@ -117,12 +191,12 @@ def run_tabular_benchmark(
         traversals=traversals,
         repeats=repeats,
         median_seconds=median_seconds,
-        median_absolute_deviation_seconds=_median_absolute_deviation(timing_values),
+        median_absolute_deviation_seconds=median_absolute_deviation(timing_values),
         traversals_per_second=traversals / median_seconds,
         memory_metric=memory_metric,
         memory_sampling_interval_seconds=float(memory_sampling_interval_seconds),
         median_peak_memory_mb=median_memory,
-        median_absolute_deviation_memory_mb=_median_absolute_deviation(memory_values),
+        median_absolute_deviation_memory_mb=median_absolute_deviation(memory_values),
         expected_value_player_zero=expected_value,
         exploitability=exploitability,
         nash_conv=nash_conv,
@@ -156,13 +230,13 @@ def _run_isolated_workload(
         while not parent_connection.poll(memory_sampling_interval_seconds):
             peak_memory_bytes = max(
                 peak_memory_bytes,
-                _process_tree_memory_bytes(measured_process, memory_metric),
+                process_tree_memory_bytes(measured_process, memory_metric),
             )
             if not process.is_alive():
                 raise RuntimeError("benchmark worker stopped before returning a result")
         peak_memory_bytes = max(
             peak_memory_bytes,
-            _process_tree_memory_bytes(measured_process, memory_metric),
+            process_tree_memory_bytes(measured_process, memory_metric),
         )
         trained_message = parent_connection.recv()
         if trained_message[0] == "error":
@@ -239,28 +313,6 @@ def _expect_message(connection: Connection, expected_kind: str) -> None:
         raise RuntimeError(f"benchmark worker did not report {expected_kind}")
 
 
-def _preferred_memory_metric() -> str:
-    """Choose the most informative memory measure available on this platform."""
-    memory = psutil.Process().memory_full_info()
-    if hasattr(memory, "pss"):
-        return "pss"
-    if hasattr(memory, "uss"):
-        return "uss"
-    return "rss"
-
-
-def _process_tree_memory_bytes(process: psutil.Process, metric: str) -> int:
-    """Sum a memory measure across a process and its current descendants."""
-    total = 0
-    for member in (process, *process.children(recursive=True)):
-        try:
-            memory = member.memory_full_info()
-        except (psutil.AccessDenied, psutil.NoSuchProcess):
-            continue
-        total += int(getattr(memory, metric))
-    return total
-
-
 def _create_solver(
     tree: IndexedGameTree,
     solver_id: str,
@@ -287,11 +339,6 @@ def _validate_averaging_delay(solver_id: str, averaging_delay: int) -> None:
         raise ValueError("averaging_delay must not be negative")
     if solver_id not in ("naive_cfr_plus", "cfr_plus") and averaging_delay != 0:
         raise ValueError("averaging_delay applies only to CFR+ solvers")
-
-
-def _median_absolute_deviation(values: tuple[float, ...]) -> float:
-    centre = median(values)
-    return median(abs(value - centre) for value in values)
 
 
 def _validate_positive_integer(name: str, value: int) -> None:

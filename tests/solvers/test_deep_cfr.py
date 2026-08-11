@@ -8,15 +8,20 @@ from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
 from ac_cfr.solvers.deep_cfr import DeepCFR, _InferenceRequest, _regret_match_batch
 from ac_cfr.solvers.naive_deep_cfr import deep_cfr_regret_matching
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import AdvantageSample, PackedAdvantageReservoir, UniformReservoir
 
 
 class _ObservedDeepCFR(DeepCFR):
     """Record inference request sizes without changing solver behaviour."""
 
-    def __init__(self, tree: IndexedGameTree, config: DeepCFRTrainingConfig) -> None:
-        super().__init__(tree, config)
+    def __init__(
+        self,
+        tree: IndexedGameTree,
+        config: DeepCFRTrainingConfig,
+        runtime: DeepCFRRuntimeConfig,
+    ) -> None:
+        super().__init__(tree, config, runtime)
         self.inference_batch_sizes: list[int] = []
 
     def _batched_strategies(
@@ -65,20 +70,21 @@ def test_optimised_deep_cfr_uses_packed_memory_and_exports_a_legal_policy() -> N
         strategy_reservoir_capacity=400,
         advantage_training_steps=1,
         strategy_training_steps=1,
-        batch_size=64,
+        training_batch_size=64,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
         dropout_probability=0.0,
         seed=2026,
     )
-    solver = _ObservedDeepCFR(tree, config)
+    runtime = DeepCFRRuntimeConfig(inference_batch_size=2, cpu_threads=1, device="cpu")
+    solver = _ObservedDeepCFR(tree, config, runtime)
 
     solver.train(1)
     phase_times = solver.recent_training_times
 
     assert solver.iteration == 1
-    assert max(solver.inference_batch_sizes) == config.traversals_per_player
+    assert max(solver.inference_batch_sizes) == runtime.inference_batch_size
     assert all(len(reservoir) > 0 for reservoir in solver.advantage_reservoirs)
     assert len(solver.strategy_reservoir) > 0
     assert all(reservoir.resident_bytes > 0 for reservoir in solver.advantage_reservoirs)

@@ -14,7 +14,7 @@ from ac_cfr.games.base import GameId, NodeType, validate_player
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, build_leduc_neural_data
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.models import DeepCFRNetwork, build_deep_cfr_network
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import (
     AdvantageSample,
     PackedAdvantageReservoir,
@@ -116,17 +116,25 @@ _LOSS_EVALUATION_BATCHES = 4
 class NaiveDeepCFR:
     """Faithful one-trajectory-at-a-time Deep CFR correctness reference."""
 
-    def __init__(self, tree: IndexedGameTree, config: DeepCFRTrainingConfig) -> None:
+    def __init__(
+        self,
+        tree: IndexedGameTree,
+        config: DeepCFRTrainingConfig,
+        runtime: DeepCFRRuntimeConfig,
+    ) -> None:
         if not isinstance(tree, IndexedGameTree):
             raise TypeError("tree must be an IndexedGameTree")
         if tree.game_id is not GameId.LEDUC:
             raise ValueError("Deep CFR currently supports only Leduc")
         if not isinstance(config, DeepCFRTrainingConfig):
             raise TypeError("config must be a DeepCFRTrainingConfig")
+        if not isinstance(runtime, DeepCFRRuntimeConfig):
+            raise TypeError("runtime must be a DeepCFRRuntimeConfig")
 
         seed_deriver = SeedDeriver(config.seed)
         self._tree = tree
         self._config = config
+        self._runtime = runtime
         self._neural_data = build_leduc_neural_data(tree)
         self._chance_rng = seed_deriver.python_rng(RngStream.CHANCE)
         self._policy_rng = seed_deriver.python_rng(RngStream.POLICY)
@@ -163,6 +171,11 @@ class NaiveDeepCFR:
     def config(self) -> DeepCFRTrainingConfig:
         """Return the immutable training configuration."""
         return self._config
+
+    @property
+    def runtime(self) -> DeepCFRRuntimeConfig:
+        """Return the solver's immutable execution settings."""
+        return self._runtime
 
     @property
     def tree(self) -> IndexedGameTree:
@@ -430,7 +443,7 @@ class NaiveDeepCFR:
             samples=self._advantage_reservoirs[player].samples,
             current_iteration=iteration,
             training_steps=self._config.advantage_training_steps,
-            batch_size=self._config.batch_size,
+            batch_size=self._config.training_batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
@@ -460,7 +473,7 @@ class NaiveDeepCFR:
             samples=self._strategy_reservoir.samples,
             current_iteration=iteration,
             training_steps=self._config.strategy_training_steps,
-            batch_size=self._config.batch_size,
+            batch_size=self._config.training_batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),

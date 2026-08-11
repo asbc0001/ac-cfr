@@ -1,8 +1,11 @@
+from pathlib import Path
+
 import pytest
 
 from ac_cfr.common.config import ModelConfigId, StateEncodingId
 from ac_cfr.games.leduc_neural import LEDUC_NEURAL_STATE_SIZE
 from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.deep_cfr_config import load_deep_cfr_run_config
 from ac_cfr.training.reservoirs import (
     DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
     AdvantageSample,
@@ -21,7 +24,7 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
         strategy_reservoir_capacity=10_000,
         advantage_training_steps=4,
         strategy_training_steps=8,
-        batch_size=128,
+        training_batch_size=128,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -43,3 +46,44 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
 
     with pytest.raises(ValueError, match="illegal-action"):
         StrategySample(1, _STATE, _MASK, 3, (0.1, 0.2, 0.7))
+
+
+def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Path) -> None:
+    preset = Path(__file__).parents[2] / "configs" / "deep_cfr" / "leduc_baseline.toml"
+    config = load_deep_cfr_run_config(
+        preset,
+        run_id="configured_deep_cfr",
+        overrides={
+            "iterations": 12,
+            "snapshot_iterations": (2, 12),
+            "inference_batch_size": 256,
+            "model_config_id": ModelConfigId.LEDUC_DEEP_CFR_SMALL.value,
+        },
+    )
+
+    assert config.training.iterations == 12
+    assert config.training.snapshot_iterations == (2, 12)
+    assert config.training.model_config_id is ModelConfigId.LEDUC_DEEP_CFR_SMALL
+    assert config.training.training_batch_size == 512
+    assert config.runtime.inference_batch_size == 256
+    assert config.runtime.cpu_threads == 1
+    assert config.to_dict()["runtime"] == {
+        "inference_batch_size": 256,
+        "cpu_threads": 1,
+        "device": "cpu",
+    }
+
+    with pytest.raises(ValueError, match="unknown"):
+        load_deep_cfr_run_config(
+            preset,
+            run_id="invalid_override",
+            overrides={"invented_setting": 1},
+        )
+
+    invalid_preset = tmp_path / "invalid.toml"
+    invalid_preset.write_text(
+        f"{preset.read_text(encoding='utf-8')}\ninvented_setting = 1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="runtime configuration fields"):
+        load_deep_cfr_run_config(invalid_preset, run_id="invalid_preset")

@@ -1,26 +1,24 @@
 """Fixed-workload performance benchmark and completion gate for Leduc MCCFR."""
 
 import cProfile
-import csv
 import io
 import json
-import platform
 import pstats
-import subprocess
-import sys
 from collections.abc import Callable
-from importlib.metadata import version
 from pathlib import Path
-from statistics import median
 from typing import Final
 
-import psutil
-
-from ac_cfr.benchmarking.harness import BenchmarkResult, run_tabular_benchmark
+from ac_cfr.benchmarking.harness import (
+    BenchmarkResult,
+    environment_record,
+    median_absolute_deviation,
+    report_progress,
+    run_tabular_benchmark,
+)
 from ac_cfr.evaluation.plotting import plot_mccfr_performance
 from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import create_tabular_game
-from ac_cfr.persistence.files import atomic_text_writer
+from ac_cfr.persistence.files import atomic_text_writer, write_csv, write_json
 from ac_cfr.solvers import MCCFR, NaiveMCCFR
 
 BENCHMARK_ID = "mccfr"
@@ -82,7 +80,7 @@ def run_mccfr_gate(
     validation = _load_validation(validation_path)
     benchmark_results: list[tuple[str, BenchmarkResult]] = []
     for implementation, solver_id in _IMPLEMENTATIONS:
-        _report_progress(progress_callback, f"benchmark: leduc {implementation} mccfr")
+        report_progress(progress_callback, f"benchmark: leduc {implementation} mccfr")
         benchmark_results.append(
             (
                 implementation,
@@ -103,7 +101,7 @@ def run_mccfr_gate(
     profile_directory = output_directory / "profiles"
     profile_paths: list[Path] = []
     for implementation, solver_id in _IMPLEMENTATIONS:
-        _report_progress(progress_callback, f"profile: leduc {implementation} mccfr")
+        report_progress(progress_callback, f"profile: leduc {implementation} mccfr")
         profile_paths.append(_write_profile(profile_directory, solver_id))
 
     performance_path = output_directory / "plots" / "implementation_performance.png"
@@ -123,7 +121,7 @@ def run_mccfr_gate(
     ]
     passed = all(bool(check["passed"]) for check in checks)
     gate_path = output_directory / "gate.json"
-    _write_json(
+    write_json(
         gate_path,
         {
             "about": (
@@ -171,7 +169,7 @@ def run_mccfr_gate(
                     "separate_from_formal_timing": True,
                 },
             },
-            "environment": _environment_record(),
+            "environment": environment_record("numpy", "numba", "psutil", "matplotlib"),
             "checks": checks,
             "files": {
                 "validation": validation_path.name,
@@ -264,7 +262,7 @@ def _write_benchmark_results(
                 "median_absolute_deviation_seconds": result.median_absolute_deviation_seconds,
                 "traversals_per_second": result.traversals_per_second,
                 "median_absolute_deviation_traversals_per_second": (
-                    _median_absolute_deviation(throughput)
+                    median_absolute_deviation(throughput)
                 ),
                 "memory_metric": result.memory_metric,
                 "memory_sampling_interval_seconds": result.memory_sampling_interval_seconds,
@@ -275,8 +273,8 @@ def _write_benchmark_results(
                 "nash_conv": result.nash_conv,
             }
         )
-    _write_csv(runs_path, _BENCHMARK_RUN_FIELDS, run_records)
-    _write_csv(summary_path, _BENCHMARK_SUMMARY_FIELDS, summary_records)
+    write_csv(runs_path, _BENCHMARK_RUN_FIELDS, run_records)
+    write_csv(summary_path, _BENCHMARK_SUMMARY_FIELDS, summary_records)
 
 
 def _write_profile(profile_directory: Path, solver_id: str) -> Path:
@@ -332,71 +330,3 @@ def _benchmark_results_are_complete(results: list[tuple[str, BenchmarkResult]]) 
         and len(result.repeat_results) == REPEATS
         for _, result in results
     )
-
-
-def _environment_record() -> dict[str, object]:
-    """Capture the hardware and software context needed to interpret timings."""
-    process = psutil.Process()
-    is_wsl2 = "microsoft" in platform.release().lower()
-    wsl_config_paths = (
-        sorted(str(path) for path in Path("/mnt/c/Users").glob("*/.wslconfig")) if is_wsl2 else []
-    )
-    return {
-        "code_revision": _code_revision(),
-        "python": platform.python_version(),
-        "platform": platform.platform(),
-        "machine": platform.machine(),
-        "processor": platform.processor(),
-        "logical_cpu_count": psutil.cpu_count(logical=True),
-        "physical_cpu_count": psutil.cpu_count(logical=False),
-        "available_cpu_count": (
-            len(process.cpu_affinity()) if hasattr(process, "cpu_affinity") else None
-        ),
-        "total_memory_bytes": psutil.virtual_memory().total,
-        "wsl2": is_wsl2,
-        "wsl_config_paths": wsl_config_paths,
-        "numpy": version("numpy"),
-        "numba": version("numba"),
-        "psutil": version("psutil"),
-        "matplotlib": version("matplotlib"),
-        "executable": sys.executable,
-    }
-
-
-def _code_revision() -> str:
-    """Return the current commit hash and mark uncommitted code."""
-    revision = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    dirty = subprocess.run(("git", "diff", "--quiet"), check=False).returncode != 0
-    return f"{revision}-dirty" if dirty else revision
-
-
-def _median_absolute_deviation(values: tuple[float, ...]) -> float:
-    """Return the median distance from the sample median."""
-    centre = median(values)
-    return median(abs(value - centre) for value in values)
-
-
-def _write_csv(path: Path, fields: tuple[str, ...], records: list[dict[str, object]]) -> None:
-    """Atomically write CSV records using a fixed column order."""
-    with atomic_text_writer(path) as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=list(fields), lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def _write_json(path: Path, values: dict[str, object]) -> None:
-    """Atomically write deterministic, readable JSON."""
-    with atomic_text_writer(path) as output_file:
-        json.dump(values, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
-
-
-def _report_progress(callback: Callable[[str], None] | None, message: str) -> None:
-    """Send a progress message when the caller supplied one."""
-    if callback is not None:
-        callback(message)

@@ -1,6 +1,6 @@
 """Reusable poker-solver training orchestration."""
 
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import AdvantageSample, StrategySample, UniformReservoir
 from ac_cfr.training.runner import (
     TabularTrainingConfig,
@@ -12,6 +12,7 @@ from ac_cfr.training.runner import (
 __all__ = (
     "AdvantageSample",
     "DeepCFRTrainingConfig",
+    "DeepCFRRuntimeConfig",
     "StrategySample",
     "TabularTrainingConfig",
     "TrainingOutcome",

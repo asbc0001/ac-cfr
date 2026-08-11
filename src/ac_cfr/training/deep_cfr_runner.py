@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 
+import torch
+
 from ac_cfr.common.config import GameConfigurationId
 from ac_cfr.common.provenance import code_revision
 from ac_cfr.evaluation.metrics import evaluate_strategy
@@ -25,7 +27,7 @@ from ac_cfr.persistence.deep_cfr_snapshots import (
 from ac_cfr.persistence.files import atomic_text_writer
 from ac_cfr.persistence.results import DeepCFRMetricStore
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 
 DEEP_CFR_SOLVER_ID = "naive_deep_cfr"
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -38,6 +40,7 @@ class DeepCFRRunConfig:
     run_id: str
     checkpoint_interval: int
     training: DeepCFRTrainingConfig
+    runtime: DeepCFRRuntimeConfig
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or _IDENTIFIER_PATTERN.fullmatch(self.run_id) is None:
@@ -50,6 +53,8 @@ class DeepCFRRunConfig:
             raise ValueError("checkpoint_interval must be positive")
         if not isinstance(self.training, DeepCFRTrainingConfig):
             raise TypeError("training must be a DeepCFRTrainingConfig")
+        if not isinstance(self.runtime, DeepCFRRuntimeConfig):
+            raise TypeError("runtime must be a DeepCFRRuntimeConfig")
 
     def to_dict(self) -> dict[str, object]:
         """Return stable JSON-compatible run configuration values."""
@@ -57,6 +62,7 @@ class DeepCFRRunConfig:
             "run_id": self.run_id,
             "checkpoint_interval": self.checkpoint_interval,
             "training": self.training.to_dict(),
+            "runtime": self.runtime.to_dict(),
         }
 
     @classmethod
@@ -66,6 +72,7 @@ class DeepCFRRunConfig:
             "run_id",
             "checkpoint_interval",
             "training",
+            "runtime",
         }:
             raise ValueError("Deep CFR run configuration fields are incompatible")
         try:
@@ -73,6 +80,7 @@ class DeepCFRRunConfig:
                 run_id=values["run_id"],
                 checkpoint_interval=values["checkpoint_interval"],
                 training=DeepCFRTrainingConfig.from_dict(values["training"]),
+                runtime=DeepCFRRuntimeConfig.from_dict(values["runtime"]),
             )
         except (TypeError, ValueError) as error:
             raise ValueError("Deep CFR run configuration is invalid") from error
@@ -100,8 +108,9 @@ def start_deep_cfr_training(
     run_directory = runs_root / config.run_id
     if run_directory.exists():
         raise FileExistsError(f"run directory already exists: {run_directory}")
+    _apply_runtime(config.runtime)
     tree = compile_game_tree(LeducGame(), LeducConfig())
-    solver = NaiveDeepCFR(tree, config.training)
+    solver = NaiveDeepCFR(tree, config.training, config.runtime)
     revision = code_revision()
     _write_run_config(run_directory / "run_config.json", config, revision)
     return _execute_schedule(
@@ -121,14 +130,17 @@ def resume_deep_cfr_training(
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> DeepCFRTrainingOutcome:
     """Resume one reference Deep CFR run from a complete outer iteration."""
-    tree = compile_game_tree(LeducGame(), LeducConfig())
-    loaded = load_deep_cfr_checkpoint(checkpoint_path, tree, map_location="cpu")
     run_directory = checkpoint_path.parent.parent
     config = _load_run_config(run_directory / "run_config.json")
+    _apply_runtime(config.runtime)
+    tree = compile_game_tree(LeducGame(), LeducConfig())
+    loaded = load_deep_cfr_checkpoint(checkpoint_path, tree, map_location=config.runtime.device)
     if config.run_id != loaded.metadata["run_id"]:
         raise ValueError("checkpoint run_id does not match run_config.json")
     if config.training != loaded.solver.config:
         raise ValueError("checkpoint training configuration does not match run_config.json")
+    if config.runtime != loaded.solver.runtime:
+        raise ValueError("checkpoint runtime configuration does not match run_config.json")
     result_store = DeepCFRMetricStore(run_directory / "metrics.csv")
     raw_records = loaded.run_state["metric_records"]
     if not isinstance(raw_records, list):
@@ -357,6 +369,11 @@ def _write_run_config(path: Path, config: DeepCFRRunConfig, revision: str) -> No
             sort_keys=True,
         )
         config_file.write("\n")
+
+
+def _apply_runtime(config: DeepCFRRuntimeConfig) -> None:
+    """Apply the resolved CPU execution setting before constructing networks."""
+    torch.set_num_threads(config.cpu_threads)
 
 
 def _load_run_config(path: Path) -> DeepCFRRunConfig:

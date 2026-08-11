@@ -1,33 +1,31 @@
 """Correctness and performance gate for CFR and CFR+."""
 
 import cProfile
-import csv
 import io
-import json
-import platform
 import pstats
-import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from importlib.metadata import version
 from pathlib import Path
-from statistics import median
 from time import perf_counter
 from typing import Final
 
 import numpy as np
-import psutil
 from numpy.typing import NDArray
 
-from ac_cfr.benchmarking.harness import BenchmarkResult, run_tabular_benchmark
+from ac_cfr.benchmarking.harness import (
+    BenchmarkResult,
+    environment_record,
+    median_absolute_deviation,
+    report_progress,
+    run_tabular_benchmark,
+)
 from ac_cfr.evaluation.metrics import StrategyMetrics, evaluate_strategy
 from ac_cfr.evaluation.plotting import plot_cfr_gate_results
 from ac_cfr.evaluation.self_play import evaluate_duplicate_self_play
 from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import create_tabular_game
 from ac_cfr.games.tree import IndexedGameTree
-from ac_cfr.persistence.files import atomic_text_writer
+from ac_cfr.persistence.files import atomic_text_writer, write_csv, write_json
 from ac_cfr.solvers import CFR, CFRPlus, NaiveCFR, NaiveCFRPlus
 
 BENCHMARK_ID = "cfr_cfr_plus"
@@ -141,7 +139,7 @@ def run_cfr_gate(
 
     for workload in WORKLOADS:
         for algorithm, reference_solver, optimised_solver in _ALGORITHMS:
-            _report_progress(
+            report_progress(
                 progress_callback,
                 f"correctness: {workload.game} {algorithm}",
             )
@@ -157,10 +155,10 @@ def run_cfr_gate(
             final_policies.update(pair_policies)
 
     checks.extend(_quality_checks(final_metrics))
-    _report_progress(progress_callback, "correctness: duplicate-deal self-play")
+    report_progress(progress_callback, "correctness: duplicate-deal self-play")
     checks.extend(_self_play_checks(final_policies))
     convergence_path = output_directory / "convergence.csv"
-    _write_csv(convergence_path, _CONVERGENCE_FIELDS, convergence_records)
+    write_csv(convergence_path, _CONVERGENCE_FIELDS, convergence_records)
 
     benchmark_results: list[tuple[str, str, BenchmarkResult]] = []
     for workload in WORKLOADS:
@@ -169,7 +167,7 @@ def run_cfr_gate(
                 ("reference", reference_solver),
                 ("optimised", optimised_solver),
             ):
-                _report_progress(
+                report_progress(
                     progress_callback,
                     f"benchmark: {workload.game} {implementation} {algorithm}",
                 )
@@ -199,7 +197,7 @@ def run_cfr_gate(
             ("reference", reference_solver),
             ("optimised", optimised_solver),
         ):
-            _report_progress(progress_callback, f"profile: leduc {implementation} {algorithm}")
+            report_progress(progress_callback, f"profile: leduc {implementation} {algorithm}")
             profile_paths.append(
                 _write_profile(
                     profile_directory,
@@ -259,7 +257,7 @@ def run_cfr_gate(
             "self_play_confidence_interval_method": "normal",
             "workloads": [asdict(workload) for workload in WORKLOADS],
         },
-        "environment": _environment_record(),
+        "environment": environment_record("numpy", "numba", "psutil", "matplotlib"),
         "checks": checks,
         "files": {
             "convergence": convergence_path.name,
@@ -277,7 +275,7 @@ def run_cfr_gate(
         },
     }
     gate_path = output_directory / "gate.json"
-    _write_json(gate_path, gate_record)
+    write_json(gate_path, gate_record)
     if not gate_passed:
         raise RuntimeError(f"CFR/CFR+ gate failed; see {gate_path}")
     return gate_path
@@ -512,7 +510,7 @@ def _write_benchmark_results(
                 "median_absolute_deviation_seconds": (result.median_absolute_deviation_seconds),
                 "traversals_per_second": result.traversals_per_second,
                 "median_absolute_deviation_traversals_per_second": (
-                    _median_absolute_deviation(throughput_values)
+                    median_absolute_deviation(throughput_values)
                 ),
                 "memory_metric": result.memory_metric,
                 "memory_sampling_interval_seconds": (result.memory_sampling_interval_seconds),
@@ -523,8 +521,8 @@ def _write_benchmark_results(
                 "nash_conv": result.nash_conv,
             }
         )
-    _write_csv(runs_path, _BENCHMARK_RUN_FIELDS, run_records)
-    _write_csv(summary_path, _BENCHMARK_SUMMARY_FIELDS, summary_records)
+    write_csv(runs_path, _BENCHMARK_RUN_FIELDS, run_records)
+    write_csv(summary_path, _BENCHMARK_SUMMARY_FIELDS, summary_records)
 
 
 def _write_profile(
@@ -563,52 +561,6 @@ def _write_profile(
         profile_file.write(profile_text.getvalue())
         profile_file.write("```\n")
     return path
-
-
-def _environment_record() -> dict[str, object]:
-    """Capture the software and hardware context needed to interpret results."""
-    process = psutil.Process()
-    is_wsl2 = "microsoft" in platform.release().lower()
-    wsl_config_paths = (
-        sorted(str(path) for path in Path("/mnt/c/Users").glob("*/.wslconfig")) if is_wsl2 else []
-    )
-    return {
-        "code_revision": _code_revision(),
-        "python": platform.python_version(),
-        "platform": platform.platform(),
-        "machine": platform.machine(),
-        "processor": platform.processor(),
-        "logical_cpu_count": psutil.cpu_count(logical=True),
-        "physical_cpu_count": psutil.cpu_count(logical=False),
-        "available_cpu_count": len(process.cpu_affinity())
-        if hasattr(process, "cpu_affinity")
-        else None,
-        "total_memory_bytes": psutil.virtual_memory().total,
-        "wsl2": is_wsl2,
-        "wsl_config_paths": wsl_config_paths,
-        "numpy": version("numpy"),
-        "numba": version("numba"),
-        "psutil": version("psutil"),
-        "matplotlib": version("matplotlib"),
-        "executable": sys.executable,
-    }
-
-
-def _code_revision() -> str:
-    """Return the current commit hash with a marker for uncommitted changes."""
-    revision = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    dirty = subprocess.run(
-        ("git", "status", "--porcelain"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    return f"{revision}-dirty" if dirty else revision
 
 
 def _create_solver(
@@ -656,34 +608,3 @@ def _flatten_table(values: tuple[tuple[float, ...], ...]) -> np.ndarray:
 def _maximum_difference(first: np.ndarray, second: np.ndarray) -> float:
     """Return the greatest elementwise absolute difference between two arrays."""
     return float(np.max(np.abs(first - second), initial=0.0))
-
-
-def _median_absolute_deviation(values: tuple[float, ...]) -> float:
-    """Return the median distance from the sample median."""
-    centre = median(values)
-    return median(abs(value - centre) for value in values)
-
-
-def _write_csv(
-    path: Path,
-    fields: tuple[str, ...],
-    records: list[dict[str, object]],
-) -> None:
-    """Atomically replace a CSV file using a fixed column order."""
-    with atomic_text_writer(path) as results_file:
-        writer = csv.DictWriter(results_file, fieldnames=list(fields), lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def _write_json(path: Path, values: dict[str, object]) -> None:
-    """Atomically write deterministic, human-readable JSON."""
-    with atomic_text_writer(path) as output_file:
-        json.dump(values, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
-
-
-def _report_progress(callback: Callable[[str], None] | None, message: str) -> None:
-    """Send a progress message when the caller supplied a callback."""
-    if callback is not None:
-        callback(message)

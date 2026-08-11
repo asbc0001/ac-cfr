@@ -4,12 +4,13 @@ import argparse
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from ac_cfr.common.config import ModelConfigId
 from ac_cfr.evaluation.plotting import (
     plot_deep_cfr_training_diagnostics,
     plot_training_diagnostics,
 )
 from ac_cfr.persistence.results import DeepCFRMetricStore, TrainingMetricStore
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.deep_cfr_config import load_deep_cfr_run_config
 from ac_cfr.training.deep_cfr_runner import (
     DEEP_CFR_SOLVER_ID,
     DeepCFRRunConfig,
@@ -30,8 +31,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     arguments = parser.parse_args(argv)
     report_progress = _progress_reporter()
-    is_deep_cfr = arguments.solver == DEEP_CFR_SOLVER_ID or (
-        arguments.resume is not None and arguments.resume.suffix == ".pt"
+    is_deep_cfr = (
+        arguments.config is not None
+        or arguments.solver == DEEP_CFR_SOLVER_ID
+        or (arguments.resume is not None and arguments.resume.suffix == ".pt")
     )
     if arguments.resume is not None:
         if any(
@@ -39,6 +42,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for value in (
                 arguments.game,
                 arguments.solver,
+                arguments.config,
                 arguments.iterations,
                 arguments.seed,
                 arguments.run_id,
@@ -54,7 +58,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.strategy_reservoir_capacity,
                 arguments.advantage_training_steps,
                 arguments.strategy_training_steps,
-                arguments.batch_size,
+                arguments.training_batch_size,
+                arguments.inference_batch_size,
+                arguments.cpu_threads,
+                arguments.device,
+                arguments.model_config_id,
                 arguments.learning_rate,
                 arguments.validation_fraction,
                 arguments.max_gradient_norm,
@@ -68,14 +76,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             else resume_tabular_training(arguments.resume, progress_callback=report_progress)
         )
     else:
-        if arguments.game is None or arguments.solver is None or arguments.iterations is None:
+        if arguments.config is None and (
+            arguments.game is None or arguments.solver is None or arguments.iterations is None
+        ):
             parser.error("new training requires --game, --solver, and --iterations")
+        if arguments.config is not None and arguments.game not in (None, "leduc"):
+            parser.error("Deep CFR configuration supports only --game leduc")
+        if arguments.config is not None and arguments.solver not in (None, DEEP_CFR_SOLVER_ID):
+            parser.error("Deep CFR configuration is incompatible with the selected solver")
         try:
-            snapshots = _parse_iterations(arguments.snapshot_iterations)
+            snapshots = (
+                None
+                if arguments.snapshot_iterations is None
+                else _parse_iterations(arguments.snapshot_iterations)
+            )
         except ValueError as error:
             parser.error(str(error))
         if is_deep_cfr:
-            if arguments.game != "leduc":
+            if arguments.config is None:
+                parser.error("new Deep CFR training requires --config")
+            if arguments.game not in (None, "leduc"):
                 parser.error("naive_deep_cfr supports only --game leduc")
             if any(
                 value is not None
@@ -98,6 +118,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:
             _reject_deep_cfr_options(parser, arguments)
+            assert arguments.game is not None
+            assert arguments.solver is not None
             evaluation_interval = (
                 _interval_for_target_count(arguments.iterations, target_count=100)
                 if arguments.evaluation_interval is None
@@ -116,7 +138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_id=arguments.run_id or new_run_id(),
                 evaluation_interval=evaluation_interval,
                 checkpoint_interval=checkpoint_interval,
-                snapshot_iterations=snapshots,
+                snapshot_iterations=() if snapshots is None else snapshots,
                 averaging_delay=0
                 if arguments.averaging_delay is None
                 else arguments.averaging_delay,
@@ -153,6 +175,7 @@ def _parser() -> argparse.ArgumentParser:
     """Build the shared training command-line parser."""
     parser = argparse.ArgumentParser(description="Train a poker solver.")
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--config", type=Path, help="Deep CFR TOML configuration preset.")
     parser.add_argument("--game", choices=("kuhn", "leduc"))
     parser.add_argument("--solver", choices=(*SOLVER_IDS, DEEP_CFR_SOLVER_ID))
     parser.add_argument("--iterations", type=int)
@@ -181,7 +204,17 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         help="Minibatch updates for each exported average-strategy network.",
     )
-    parser.add_argument("--batch-size", type=int)
+    parser.add_argument(
+        "--training-batch-size",
+        type=int,
+    )
+    parser.add_argument("--inference-batch-size", type=int)
+    parser.add_argument("--cpu-threads", type=int)
+    parser.add_argument("--device", choices=("cpu",))
+    parser.add_argument(
+        "--model-config-id",
+        choices=tuple(config_id.value for config_id in ModelConfigId),
+    )
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--validation-fraction", type=float)
     parser.add_argument("--max-gradient-norm", type=float)
@@ -243,42 +276,50 @@ def _print_final_metrics(metrics_path: Path, *, deep_cfr: bool) -> None:
 
 def _deep_cfr_config(
     arguments: argparse.Namespace,
-    snapshots: tuple[int, ...],
+    snapshots: tuple[int, ...] | None,
 ) -> DeepCFRRunConfig:
-    """Build a Deep CFR run configuration from explicit options and documented defaults."""
-    assert arguments.iterations is not None
-    defaults = {
-        "traversals_per_player": 200,
-        "advantage_reservoir_capacity": 100_000,
-        "strategy_reservoir_capacity": 100_000,
-        "advantage_training_steps": 20,
-        "strategy_training_steps": 40,
-        "batch_size": 512,
-        "learning_rate": 1e-3,
-        "validation_fraction": 0.1,
-        "max_gradient_norm": 10.0,
-        "dropout_probability": 0.0,
+    """Load a Deep CFR preset and apply only explicitly supplied overrides."""
+    if arguments.config is None:
+        raise ValueError("new Deep CFR training requires --config")
+    run_id = arguments.run_id or new_run_id()
+    overrides = _deep_cfr_overrides(arguments, snapshots)
+    return load_deep_cfr_run_config(
+        arguments.config,
+        run_id=run_id,
+        overrides=overrides,
+    )
+
+
+def _deep_cfr_overrides(
+    arguments: argparse.Namespace,
+    snapshots: tuple[int, ...] | None,
+) -> dict[str, object]:
+    """Return only explicitly supplied values that override a TOML preset."""
+    names = (
+        "iterations",
+        "seed",
+        "checkpoint_interval",
+        "traversals_per_player",
+        "advantage_reservoir_capacity",
+        "strategy_reservoir_capacity",
+        "advantage_training_steps",
+        "strategy_training_steps",
+        "training_batch_size",
+        "inference_batch_size",
+        "cpu_threads",
+        "device",
+        "learning_rate",
+        "validation_fraction",
+        "max_gradient_norm",
+        "dropout_probability",
+        "model_config_id",
+    )
+    overrides = {
+        name: getattr(arguments, name) for name in names if getattr(arguments, name) is not None
     }
-    values = {
-        name: defaults[name] if getattr(arguments, name) is None else getattr(arguments, name)
-        for name in defaults
-    }
-    training = DeepCFRTrainingConfig(
-        iterations=arguments.iterations,
-        seed=0 if arguments.seed is None else arguments.seed,
-        snapshot_iterations=snapshots,
-        **values,
-    )
-    checkpoint_interval = (
-        _interval_for_target_count(arguments.iterations, target_count=10)
-        if arguments.checkpoint_interval is None
-        else arguments.checkpoint_interval
-    )
-    return DeepCFRRunConfig(
-        run_id=arguments.run_id or new_run_id(),
-        checkpoint_interval=checkpoint_interval,
-        training=training,
-    )
+    if snapshots is not None:
+        overrides["snapshot_iterations"] = snapshots
+    return overrides
 
 
 def _reject_deep_cfr_options(
@@ -291,7 +332,11 @@ def _reject_deep_cfr_options(
         "strategy_reservoir_capacity",
         "advantage_training_steps",
         "strategy_training_steps",
-        "batch_size",
+        "training_batch_size",
+        "inference_batch_size",
+        "cpu_threads",
+        "device",
+        "model_config_id",
         "learning_rate",
         "validation_fraction",
         "max_gradient_norm",

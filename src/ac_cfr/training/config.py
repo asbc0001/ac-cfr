@@ -17,7 +17,7 @@ class DeepCFRTrainingConfig:
     strategy_reservoir_capacity: int
     advantage_training_steps: int
     strategy_training_steps: int
-    batch_size: int
+    training_batch_size: int
     learning_rate: float
     validation_fraction: float
     max_gradient_norm: float | None
@@ -36,7 +36,7 @@ class DeepCFRTrainingConfig:
             "strategy_reservoir_capacity",
             "advantage_training_steps",
             "strategy_training_steps",
-            "batch_size",
+            "training_batch_size",
         ):
             _validate_positive_integer(name, getattr(self, name))
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
@@ -65,7 +65,10 @@ class DeepCFRTrainingConfig:
             _validate_positive_integer("snapshot iteration", iteration)
             if iteration > self.iterations:
                 raise ValueError("snapshot iterations must not exceed the training budget")
-        if self.model_config_id is not ModelConfigId.LEDUC_DEEP_CFR:
+        if self.model_config_id not in {
+            ModelConfigId.LEDUC_DEEP_CFR_BASELINE,
+            ModelConfigId.LEDUC_DEEP_CFR_SMALL,
+        }:
             raise ValueError("model_config_id must select the Leduc Deep CFR network")
         if self.state_encoding_id is not StateEncodingId.LEDUC_NEURAL:
             raise ValueError("state_encoding_id must select the Leduc neural encoding")
@@ -91,7 +94,7 @@ class DeepCFRTrainingConfig:
             "strategy_reservoir_capacity",
             "advantage_training_steps",
             "strategy_training_steps",
-            "batch_size",
+            "training_batch_size",
             "learning_rate",
             "validation_fraction",
             "max_gradient_norm",
@@ -115,6 +118,39 @@ class DeepCFRTrainingConfig:
             return cls(**parsed)
         except (TypeError, ValueError) as error:
             raise ValueError("Deep CFR training configuration is invalid") from error
+
+
+@dataclass(frozen=True, slots=True)
+class DeepCFRRuntimeConfig:
+    """Execution settings that do not change the configured learning work."""
+
+    inference_batch_size: int
+    cpu_threads: int
+    device: str
+
+    def __post_init__(self) -> None:
+        _validate_positive_integer("inference_batch_size", self.inference_batch_size)
+        _validate_positive_integer("cpu_threads", self.cpu_threads)
+        if self.device != "cpu":
+            raise ValueError("device must be 'cpu' for the current Leduc implementation")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return stable runtime values for the resolved run configuration."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, values: object) -> "DeepCFRRuntimeConfig":
+        """Reconstruct and strictly validate stored runtime settings."""
+        if not isinstance(values, dict) or set(values) != {
+            "inference_batch_size",
+            "cpu_threads",
+            "device",
+        }:
+            raise ValueError("Deep CFR runtime configuration fields are incompatible")
+        try:
+            return cls(**values)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Deep CFR runtime configuration is invalid") from error
 
 
 def _validate_positive_integer(name: str, value: int) -> None:

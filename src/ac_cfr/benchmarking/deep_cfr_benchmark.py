@@ -1,13 +1,7 @@
 """Fixed-workload reference-versus-optimised Deep CFR benchmark."""
 
-import csv
-import json
-import platform
-import subprocess
-import sys
 from collections.abc import Callable
-from dataclasses import dataclass
-from importlib.metadata import version
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from math import isfinite
 from multiprocessing import get_context
@@ -20,6 +14,13 @@ from typing import Final
 import psutil
 import torch
 
+from ac_cfr.benchmarking.harness import (
+    environment_record,
+    median_absolute_deviation,
+    preferred_memory_metric,
+    process_tree_memory_bytes,
+    report_progress,
+)
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.evaluation.plotting import (
     plot_deep_cfr_implementation_convergence,
@@ -28,9 +29,9 @@ from ac_cfr.evaluation.plotting import (
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
 from ac_cfr.persistence.deep_cfr_snapshots import deep_cfr_policy
-from ac_cfr.persistence.files import atomic_text_writer
+from ac_cfr.persistence.files import write_csv, write_json
 from ac_cfr.solvers import DeepCFR, NaiveDeepCFR
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 
 BENCHMARK_ID = "deep_cfr"
 BENCHMARK_ITERATIONS = 4
@@ -168,13 +169,13 @@ def run_deep_cfr_benchmark(
     measurements: dict[str, list[DeepCFRBenchmarkRepeat]] = {
         implementation: [] for implementation, _ in _IMPLEMENTATIONS
     }
-    memory_metric = _preferred_memory_metric()
+    memory_metric = preferred_memory_metric()
     for repeat in range(1, REPEATS + 1):
         ordered_implementations = (
             _IMPLEMENTATIONS if repeat % 2 == 1 else tuple(reversed(_IMPLEMENTATIONS))
         )
         for implementation, solver_type in ordered_implementations:
-            _report(
+            report_progress(
                 progress_callback,
                 f"benchmark: repeat {repeat}/{REPEATS}, {implementation} Deep CFR",
             )
@@ -198,7 +199,7 @@ def run_deep_cfr_benchmark(
     plot_deep_cfr_performance(summary_path, plot_path)
     checks = _benchmark_checks(results)
     benchmark_path = output_directory / "benchmark.json"
-    _write_json(
+    write_json(
         benchmark_path,
         {
             "about": (
@@ -244,7 +245,7 @@ def run_deep_cfr_benchmark(
                     "Highest sampled memory total across the training process and its children."
                 ),
             },
-            "environment": _environment_record(),
+            "environment": environment_record("torch", "numpy", "numba", "psutil", device="cpu"),
             "checks": checks,
             "files": {
                 "runs": runs_path.name,
@@ -271,7 +272,7 @@ def run_deep_cfr_convergence_comparison(
     """Compare exact reference and optimised learning at matched milestones."""
     results: dict[str, tuple[DeepCFRConvergencePoint, ...]] = {}
     for implementation, solver_type in _IMPLEMENTATIONS:
-        _report(progress_callback, f"convergence: {implementation} Deep CFR")
+        report_progress(progress_callback, f"convergence: {implementation} Deep CFR")
         results[implementation] = _run_isolated_convergence(solver_type)
 
     records = _convergence_records(results)
@@ -279,10 +280,10 @@ def run_deep_cfr_convergence_comparison(
     output_directory.mkdir(parents=True, exist_ok=True)
     convergence_path = output_directory / "implementation_convergence.csv"
     plot_path = output_directory / "plots" / "implementation_convergence.png"
-    _write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
+    write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
     plot_deep_cfr_implementation_convergence(convergence_path, plot_path)
     comparison_path = output_directory / "comparison.json"
-    _write_json(
+    write_json(
         comparison_path,
         {
             "about": (
@@ -304,7 +305,7 @@ def run_deep_cfr_convergence_comparison(
                 "pytorch_intraop_threads": PYTORCH_INTRAOP_THREADS,
                 "pytorch_interop_threads": PYTORCH_INTEROP_THREADS,
             },
-            "environment": _environment_record(),
+            "environment": environment_record("torch", "numpy", "numba", "psutil", device="cpu"),
             "checks": checks,
             "files": {
                 "convergence": convergence_path.name,
@@ -340,13 +341,13 @@ def _run_isolated_repeat(
         while not parent_connection.poll(MEMORY_SAMPLING_INTERVAL_SECONDS):
             peak_memory_bytes = max(
                 peak_memory_bytes,
-                _process_tree_memory_bytes(measured_process, memory_metric),
+                process_tree_memory_bytes(measured_process, memory_metric),
             )
             if not process.is_alive():
                 raise RuntimeError("Deep CFR benchmark worker stopped before returning a result")
         peak_memory_bytes = max(
             peak_memory_bytes,
-            _process_tree_memory_bytes(measured_process, memory_metric),
+            process_tree_memory_bytes(measured_process, memory_metric),
         )
         trained_message = parent_connection.recv()
         if trained_message[0] == "error":
@@ -417,7 +418,7 @@ def _convergence_worker(connection: Connection, solver_type: type[NaiveDeepCFR])
         torch.set_num_interop_threads(PYTORCH_INTEROP_THREADS)
         tree = compile_game_tree(LeducGame(), LeducConfig())
         _warm_up_solver(solver_type, tree)
-        solver = solver_type(tree, _convergence_config())
+        solver = solver_type(tree, _convergence_config(), _runtime_config())
         elapsed_training_seconds = 0.0
         points: list[tuple[int, float, float, float, float]] = []
         for iteration in range(1, CONVERGENCE_MILESTONES[-1] + 1):
@@ -457,7 +458,7 @@ def _benchmark_worker(connection: Connection, solver_type: type[NaiveDeepCFR]) -
         torch.set_num_interop_threads(PYTORCH_INTEROP_THREADS)
         tree = compile_game_tree(LeducGame(), LeducConfig())
         _warm_up_solver(solver_type, tree)
-        solver = solver_type(tree, _benchmark_config())
+        solver = solver_type(tree, _benchmark_config(), _runtime_config())
         connection.send(("ready",))
         if connection.recv() != "start":
             raise RuntimeError("Deep CFR benchmark worker did not receive the start command")
@@ -504,14 +505,14 @@ def _warm_up_solver(solver_type: type[NaiveDeepCFR], tree: IndexedGameTree) -> N
         strategy_reservoir_capacity=1_000,
         advantage_training_steps=2,
         strategy_training_steps=2,
-        batch_size=32,
+        training_batch_size=32,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
         dropout_probability=0.0,
         seed=BENCHMARK_SEED,
     )
-    solver_type(tree, config).train(1)
+    solver_type(tree, config, _runtime_config(inference_batch_size=32)).train(1)
 
 
 def _benchmark_config() -> DeepCFRTrainingConfig:
@@ -523,7 +524,7 @@ def _benchmark_config() -> DeepCFRTrainingConfig:
         strategy_reservoir_capacity=100_000,
         advantage_training_steps=ADVANTAGE_TRAINING_STEPS,
         strategy_training_steps=STRATEGY_TRAINING_STEPS,
-        batch_size=512,
+        training_batch_size=512,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -534,20 +535,18 @@ def _benchmark_config() -> DeepCFRTrainingConfig:
 
 def _convergence_config() -> DeepCFRTrainingConfig:
     """Return the matched configuration used for trajectory comparison."""
-    return DeepCFRTrainingConfig(
-        iterations=CONVERGENCE_MILESTONES[-1],
-        traversals_per_player=TRAVERSALS_PER_PLAYER,
-        advantage_reservoir_capacity=100_000,
-        strategy_reservoir_capacity=100_000,
-        advantage_training_steps=ADVANTAGE_TRAINING_STEPS,
-        strategy_training_steps=STRATEGY_TRAINING_STEPS,
-        batch_size=512,
-        learning_rate=1e-3,
-        validation_fraction=0.1,
-        max_gradient_norm=10.0,
-        dropout_probability=0.0,
-        seed=BENCHMARK_SEED,
+    return replace(
+        _benchmark_config(),
         snapshot_iterations=CONVERGENCE_MILESTONES[:-1],
+    )
+
+
+def _runtime_config(*, inference_batch_size: int = 512) -> DeepCFRRuntimeConfig:
+    """Return the execution settings shared by matched benchmark runs."""
+    return DeepCFRRuntimeConfig(
+        inference_batch_size=inference_batch_size,
+        cpu_threads=PYTORCH_INTRAOP_THREADS,
+        device="cpu",
     )
 
 
@@ -691,8 +690,8 @@ def _write_results(
                 }
             )
         summary_records.append(_summary_record(common, result))
-    _write_csv(runs_path, _RUN_FIELDS, run_records)
-    _write_csv(summary_path, _SUMMARY_FIELDS, summary_records)
+    write_csv(runs_path, _RUN_FIELDS, run_records)
+    write_csv(summary_path, _SUMMARY_FIELDS, summary_records)
 
 
 def _summary_record(
@@ -714,23 +713,23 @@ def _summary_record(
         **common,
         "repeats": len(measurements),
         "median_seconds": median(total_times),
-        "median_absolute_deviation_seconds": _median_absolute_deviation(total_times),
+        "median_absolute_deviation_seconds": median_absolute_deviation(total_times),
         "median_traversal_seconds": median(traversal_times),
         "median_advantage_training_seconds": median(advantage_times),
         "median_strategy_training_seconds": median(strategy_times),
         "median_other_seconds": median(other_times),
         "end_to_end_traversals_per_second": _total_traversals() / median(total_times),
         "median_absolute_deviation_end_to_end_traversals_per_second": (
-            _median_absolute_deviation(end_to_end_throughput)
+            median_absolute_deviation(end_to_end_throughput)
         ),
         "collection_traversals_per_second": _total_traversals() / median(traversal_times),
         "median_absolute_deviation_collection_traversals_per_second": (
-            _median_absolute_deviation(collection_throughput)
+            median_absolute_deviation(collection_throughput)
         ),
         "memory_metric": result.memory_metric,
         "memory_sampling_interval_seconds": MEMORY_SAMPLING_INTERVAL_SECONDS,
         "median_peak_memory_mb": median(memory_values),
-        "median_absolute_deviation_memory_mb": _median_absolute_deviation(memory_values),
+        "median_absolute_deviation_memory_mb": median_absolute_deviation(memory_values),
         "expected_value_player_zero": final.expected_value_player_zero,
         "exploitability": final.exploitability,
         "nash_conv": final.nash_conv,
@@ -800,84 +799,3 @@ def _expect_message(connection: Connection, expected_kind: str) -> None:
         raise RuntimeError(f"Deep CFR benchmark worker failed: {message[1]}")
     if message[0] != expected_kind:
         raise RuntimeError(f"Deep CFR benchmark worker did not report {expected_kind}")
-
-
-def _preferred_memory_metric() -> str:
-    """Prefer proportional memory, then unique memory, then resident memory."""
-    memory = psutil.Process().memory_full_info()
-    if hasattr(memory, "pss"):
-        return "pss"
-    if hasattr(memory, "uss"):
-        return "uss"
-    return "rss"
-
-
-def _process_tree_memory_bytes(process: psutil.Process, metric: str) -> int:
-    """Sum the selected memory measure across a process and its children."""
-    total = 0
-    for member in (process, *process.children(recursive=True)):
-        try:
-            memory = member.memory_full_info()
-        except (psutil.AccessDenied, psutil.NoSuchProcess):
-            continue
-        total += int(getattr(memory, metric))
-    return total
-
-
-def _environment_record() -> dict[str, object]:
-    """Capture the software and hardware context needed to interpret results."""
-    process = psutil.Process()
-    return {
-        "code_revision": _code_revision(),
-        "python": platform.python_version(),
-        "platform": platform.platform(),
-        "machine": platform.machine(),
-        "logical_cpu_count": psutil.cpu_count(logical=True),
-        "physical_cpu_count": psutil.cpu_count(logical=False),
-        "available_cpu_count": (
-            len(process.cpu_affinity()) if hasattr(process, "cpu_affinity") else None
-        ),
-        "total_memory_bytes": psutil.virtual_memory().total,
-        "pytorch": torch.__version__,
-        "numpy": version("numpy"),
-        "numba": version("numba"),
-        "psutil": version("psutil"),
-        "executable": sys.executable,
-        "device": "cpu",
-    }
-
-
-def _code_revision() -> str:
-    """Return the current Git revision and label uncommitted work."""
-    revision = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    dirty = subprocess.run(("git", "status", "--porcelain"), check=True, capture_output=True).stdout
-    return f"{revision}-dirty" if dirty else revision
-
-
-def _median_absolute_deviation(values: tuple[float, ...]) -> float:
-    """Return the median distance from the sample median."""
-    centre = median(values)
-    return median(abs(value - centre) for value in values)
-
-
-def _write_csv(path: Path, fields: tuple[str, ...], records: list[dict[str, object]]) -> None:
-    with atomic_text_writer(path) as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=list(fields), lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def _write_json(path: Path, value: object) -> None:
-    with atomic_text_writer(path) as output_file:
-        json.dump(value, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
-
-
-def _report(callback: Callable[[str], None] | None, message: str) -> None:
-    if callback is not None:
-        callback(message)

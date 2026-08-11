@@ -10,7 +10,7 @@ from ac_cfr.persistence.deep_cfr_checkpoints import (
     save_deep_cfr_checkpoint,
 )
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 
 
 def _config() -> DeepCFRTrainingConfig:
@@ -21,7 +21,7 @@ def _config() -> DeepCFRTrainingConfig:
         strategy_reservoir_capacity=100,
         advantage_training_steps=1,
         strategy_training_steps=1,
-        batch_size=128,
+        training_batch_size=128,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -31,12 +31,16 @@ def _config() -> DeepCFRTrainingConfig:
     )
 
 
+def _runtime() -> DeepCFRRuntimeConfig:
+    return DeepCFRRuntimeConfig(inference_batch_size=64, cpu_threads=1, device="cpu")
+
+
 def test_interrupted_deep_cfr_resume_matches_uninterrupted_training(tmp_path: Path) -> None:
     tree = compile_game_tree(LeducGame(), LeducConfig())
-    uninterrupted = NaiveDeepCFR(tree, _config())
+    uninterrupted = NaiveDeepCFR(tree, _config(), _runtime())
     uninterrupted.train(2)
 
-    interrupted = NaiveDeepCFR(tree, _config())
+    interrupted = NaiveDeepCFR(tree, _config(), _runtime())
     interrupted.train(1)
     checkpoint_path = tmp_path / "latest.pt"
     save_deep_cfr_checkpoint(
@@ -51,6 +55,7 @@ def test_interrupted_deep_cfr_resume_matches_uninterrupted_training(tmp_path: Pa
     resumed.train(1)
 
     assert loaded.metadata["optimizer_state_required"] is False
+    assert resumed.runtime == _runtime()
     assert resumed.iteration == uninterrupted.iteration == 2
     assert resumed.training_metrics == uninterrupted.training_metrics
     assert resumed.training_rng_state() == uninterrupted.training_rng_state()
@@ -63,7 +68,7 @@ def test_interrupted_deep_cfr_resume_matches_uninterrupted_training(tmp_path: Pa
 
 def test_deep_cfr_checkpoint_rejects_incompatible_metadata(tmp_path: Path) -> None:
     tree = compile_game_tree(LeducGame(), LeducConfig())
-    solver = NaiveDeepCFR(tree, _config())
+    solver = NaiveDeepCFR(tree, _config(), _runtime())
     solver.train(1)
     checkpoint_path = tmp_path / "latest.pt"
     save_deep_cfr_checkpoint(

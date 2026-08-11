@@ -1,7 +1,9 @@
 """Small durable-file helpers shared by project persistence formats."""
 
+import csv
+import json
 import os
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -58,6 +60,25 @@ def atomic_text_writer(path: Path) -> Iterator[TextIO]:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
         raise
+
+
+def write_csv(
+    path: Path,
+    fields: Sequence[str],
+    records: Iterable[Mapping[str, object]],
+) -> None:
+    """Atomically write CSV records using a fixed column order."""
+    with atomic_text_writer(path) as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=list(fields), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(records)
+
+
+def write_json(path: Path, value: object) -> None:
+    """Atomically write deterministic, human-readable JSON."""
+    with atomic_text_writer(path) as output_file:
+        json.dump(value, output_file, indent=2, sort_keys=True)
+        output_file.write("\n")
 
 
 def _sync_directory(directory: Path) -> None:

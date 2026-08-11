@@ -8,13 +8,14 @@ from pathlib import Path
 from statistics import median
 from typing import Final
 
+from ac_cfr.benchmarking.harness import report_progress
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
 from ac_cfr.persistence.deep_cfr_checkpoints import load_deep_cfr_checkpoint
 from ac_cfr.persistence.deep_cfr_snapshots import deep_cfr_policy, load_deep_cfr_snapshot
-from ac_cfr.persistence.files import atomic_text_writer
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.persistence.files import write_csv, write_json
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig, start_deep_cfr_training
 
 VALIDATION_ID = "deep_cfr"
@@ -69,11 +70,11 @@ def run_deep_cfr_reference_validation(
     run_files: dict[str, object] = {}
     tree = compile_game_tree(LeducGame(), LeducConfig())
     for seed_number, seed in enumerate(SEEDS, start=1):
-        _report(progress_callback, f"seed {seed_number}/{len(SEEDS)}: {seed}")
+        report_progress(progress_callback, f"seed {seed_number}/{len(SEEDS)}: {seed}")
         run_id = f"leduc-naive-deep-cfr-fixed-steps-seed-{seed}"
         run_directory = runs_root / run_id
         if run_directory.exists():
-            _report(progress_callback, f"seed {seed}: reusing compatible completed run")
+            report_progress(progress_callback, f"seed {seed}: reusing compatible completed run")
         else:
             start_deep_cfr_training(
                 _run_config(run_id, seed),
@@ -81,7 +82,7 @@ def run_deep_cfr_reference_validation(
                 progress_callback=(
                     None
                     if progress_callback is None
-                    else lambda completed, total, seed=seed: _report(
+                    else lambda completed, total, seed=seed: report_progress(
                         progress_callback,
                         f"seed {seed}: {completed}/{total} outer iterations",
                     )
@@ -106,11 +107,12 @@ def run_deep_cfr_reference_validation(
     output_directory.mkdir(parents=True, exist_ok=True)
     convergence_path = output_directory / "convergence.csv"
     summary_path = output_directory / "summary.csv"
-    _write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
-    _write_csv(summary_path, _SUMMARY_FIELDS, summary)
+    write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
+    write_csv(summary_path, _SUMMARY_FIELDS, summary)
     passed = all(bool(check["passed"]) for check in checks)
     validation_path = output_directory / "validation.json"
-    _write_json(
+    representative_config = _run_config("validation-metadata", SEEDS[0])
+    write_json(
         validation_path,
         {
             "about": (
@@ -124,18 +126,8 @@ def run_deep_cfr_reference_validation(
                 "solver": "naive_deep_cfr",
                 "seeds": list(SEEDS),
                 "milestones": list(MILESTONES),
-                "outer_iterations": MILESTONES[-1],
-                "traversals_per_player_per_iteration": 200,
-                "traversals_per_outer_iteration": 400,
-                "advantage_reservoir_capacity": 100_000,
-                "strategy_reservoir_capacity": 100_000,
-                "advantage_training_steps": 20,
-                "strategy_training_steps": 40,
-                "batch_size": 512,
-                "learning_rate": 0.001,
-                "validation_fraction": 0.1,
-                "max_gradient_norm": 10.0,
-                "dropout_probability": 0.0,
+                **representative_config.training.to_dict(),
+                "runtime": representative_config.runtime.to_dict(),
                 "early_stopping": False,
                 "timed_region": (
                     "solver.train, including configured milestone strategy-network training"
@@ -171,13 +163,18 @@ def _run_config(run_id: str, seed: int) -> DeepCFRRunConfig:
             strategy_reservoir_capacity=100_000,
             advantage_training_steps=20,
             strategy_training_steps=40,
-            batch_size=512,
+            training_batch_size=512,
             learning_rate=1e-3,
             validation_fraction=0.1,
             max_gradient_norm=10.0,
             dropout_probability=0.0,
             seed=seed,
             snapshot_iterations=MILESTONES[:-1],
+        ),
+        runtime=DeepCFRRuntimeConfig(
+            inference_batch_size=512,
+            cpu_threads=1,
+            device="cpu",
         ),
     )
 
@@ -358,27 +355,3 @@ def _number(record: dict[str, object], field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RuntimeError(f"Deep CFR validation field is not numeric: {field}")
     return float(value)
-
-
-def _write_csv(
-    path: Path,
-    fields: tuple[str, ...],
-    records: list[dict[str, object]],
-) -> None:
-    """Atomically write records using a fixed column order."""
-    with atomic_text_writer(path) as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=list(fields), lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def _write_json(path: Path, values: dict[str, object]) -> None:
-    """Atomically write deterministic readable JSON."""
-    with atomic_text_writer(path) as output_file:
-        json.dump(values, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
-
-
-def _report(callback: Callable[[str], None] | None, message: str) -> None:
-    if callback is not None:
-        callback(message)

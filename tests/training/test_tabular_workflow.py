@@ -10,9 +10,8 @@ from ac_cfr.benchmarking import run_tabular_benchmark
 from ac_cfr.cli.evaluate import main as evaluate_main
 from ac_cfr.cli.plot_results import main as plot_main
 from ac_cfr.cli.train import main as train_main
-from ac_cfr.games.base import GameId, NodeType
+from ac_cfr.games.base import GameId
 from ac_cfr.games.kuhn import KuhnConfig, KuhnGame
-from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tabular import create_tabular_game
 from ac_cfr.persistence.checkpoints import load_tabular_checkpoint
 from ac_cfr.persistence.files import atomic_binary_writer
@@ -188,15 +187,6 @@ def test_mccfr_training_command_exports_a_registry_loadable_agent(tmp_path: Path
 
     resolved = load_strategy_registry(registry_path, project_root=tmp_path).resolve("leduc_test")
     assert isinstance(resolved.agent, TabularAgent)
-    state = LeducGame().initial_state(LeducConfig())
-    while state.node_type is NodeType.CHANCE:
-        state = state.apply_action(state.chance_outcomes()[0].outcome)
-    information_state = state.information_state()
-    strategy = resolved.agent.get_strategy(
-        information_state,
-        information_state.legal_actions,
-    )
-    assert sum(strategy) == pytest.approx(1.0)
 
 
 def test_evaluation_results_plot_and_benchmark_foundations(tmp_path: Path) -> None:

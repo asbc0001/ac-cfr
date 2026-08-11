@@ -18,14 +18,14 @@ from ac_cfr.models import DeepCFRNetwork, build_deep_cfr_network, deep_cfr_netwo
 from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, tree_compatibility_digest
 from ac_cfr.persistence.files import atomic_binary_writer
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
-from ac_cfr.training.config import DeepCFRTrainingConfig
+from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import (
     DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
     AdvantageSample,
     StrategySample,
 )
 
-DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 2
+DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 3
 PROJECT_VERSION = version("ac-cfr")
 _SOLVER_ID = "naive_deep_cfr"
 _RNG_CONTRACT = "python_random_and_derived_torch_v1"
@@ -97,6 +97,7 @@ def save_deep_cfr_checkpoint(
         "checkpoint_id": checkpoint_id,
         "iteration": solver.iteration,
         "training_config": config.to_dict(),
+        "runtime_config": solver.runtime.to_dict(),
         "architecture_config": architecture.to_dict(),
         "schedule_state": {
             "completed_snapshot_iterations": completed_snapshots,
@@ -171,6 +172,7 @@ def load_deep_cfr_checkpoint(
 
     metadata = _validated_metadata(payload["metadata"], tree)
     config = DeepCFRTrainingConfig.from_dict(metadata["training_config"])
+    runtime = DeepCFRRuntimeConfig.from_dict(metadata["runtime_config"])
     expected_architecture = deep_cfr_network_config(
         config.model_config_id,
         dropout_probability=config.dropout_probability,
@@ -200,7 +202,7 @@ def load_deep_cfr_checkpoint(
     )
     rng_state = _validated_rng_state(payload["rng_state"])
 
-    solver = NaiveDeepCFR(tree, config)
+    solver = NaiveDeepCFR(tree, config, runtime)
     for player, samples in enumerate(advantage_reservoirs):
         reservoir_state = payload["advantage_reservoirs"][player]
         solver.advantage_reservoirs[player].restore_training_state(
@@ -249,6 +251,7 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
         "checkpoint_id",
         "iteration",
         "training_config",
+        "runtime_config",
         "architecture_config",
         "schedule_state",
         "metric_logger_state",
@@ -278,6 +281,7 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
     if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
         raise ValueError("Deep CFR checkpoint iteration is invalid")
     config = DeepCFRTrainingConfig.from_dict(metadata["training_config"])
+    DeepCFRRuntimeConfig.from_dict(metadata["runtime_config"])
     if iteration > config.iterations:
         raise ValueError("Deep CFR checkpoint iteration exceeds its training budget")
     config_identifiers = {

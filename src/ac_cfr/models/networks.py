@@ -61,15 +61,24 @@ class DeepCFRNetworkConfig:
 
 
 LEDUC_DEEP_CFR_NETWORK = DeepCFRNetworkConfig(
-    model_config_id=ModelConfigId.LEDUC_DEEP_CFR,
+    model_config_id=ModelConfigId.LEDUC_DEEP_CFR_BASELINE,
     input_size=LEDUC_NEURAL_STATE_SIZE,
     hidden_sizes=(64, 64, 64),
     output_size=LEDUC_ACTION_COUNT,
     input_scaling=LEDUC_NEURAL_INPUT_SCALING,
 )
 
+LEDUC_DEEP_CFR_SMALL_NETWORK = DeepCFRNetworkConfig(
+    model_config_id=ModelConfigId.LEDUC_DEEP_CFR_SMALL,
+    input_size=LEDUC_NEURAL_STATE_SIZE,
+    hidden_sizes=(32, 32, 32),
+    output_size=LEDUC_ACTION_COUNT,
+    input_scaling=LEDUC_NEURAL_INPUT_SCALING,
+)
+
 _NETWORK_CONFIGS = {
-    ModelConfigId.LEDUC_DEEP_CFR: LEDUC_DEEP_CFR_NETWORK,
+    ModelConfigId.LEDUC_DEEP_CFR_BASELINE: LEDUC_DEEP_CFR_NETWORK,
+    ModelConfigId.LEDUC_DEEP_CFR_SMALL: LEDUC_DEEP_CFR_SMALL_NETWORK,
 }
 
 

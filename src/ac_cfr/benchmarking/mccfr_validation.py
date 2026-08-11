@@ -1,8 +1,6 @@
 """Reference-versus-optimised MCCFR validation on Leduc poker."""
 
 import csv
-import json
-import subprocess
 from collections.abc import Callable
 from itertools import pairwise
 from pathlib import Path
@@ -14,6 +12,8 @@ import numpy as np
 from numpy.random import default_rng
 from numpy.typing import NDArray
 
+from ac_cfr.benchmarking.harness import report_progress
+from ac_cfr.common.provenance import code_revision
 from ac_cfr.common.rng import RngStream, SeedDeriver
 from ac_cfr.evaluation.metrics import StrategyMetrics, evaluate_strategy
 from ac_cfr.evaluation.plotting import plot_mccfr_validation
@@ -22,7 +22,7 @@ from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import create_tabular_game
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.persistence.checkpoints import save_tabular_checkpoint
-from ac_cfr.persistence.files import atomic_text_writer
+from ac_cfr.persistence.files import write_csv, write_json
 from ac_cfr.persistence.snapshots import export_tabular_snapshot, load_tabular_snapshot
 from ac_cfr.solvers import MCCFR, NaiveMCCFR
 from ac_cfr.training.runner import TabularTrainingConfig
@@ -107,10 +107,10 @@ def run_mccfr_validation(
     final_solvers: dict[int, MCCFR] = {}
     final_metrics: dict[int, StrategyMetrics] = {}
 
-    _report_progress(progress_callback, "semantic equivalence: identical sampled draws")
+    report_progress(progress_callback, "semantic equivalence: identical sampled draws")
     equivalence = _same_draw_equivalence(tree)
     for seed_number, seed in enumerate(SEEDS, start=1):
-        _report_progress(progress_callback, f"optimised seed {seed_number}/{len(SEEDS)}: {seed}")
+        report_progress(progress_callback, f"optimised seed {seed_number}/{len(SEEDS)}: {seed}")
         solver = MCCFR(tree, seed=seed)
         solver.train(1)  # Compile before measuring solver-training time.
         solver = MCCFR(tree, seed=seed)
@@ -134,7 +134,7 @@ def run_mccfr_validation(
                 )
             )
             previous_iteration = milestone
-            _report_progress(progress_callback, f"seed {seed}: {milestone:,} iterations")
+            report_progress(progress_callback, f"seed {seed}: {milestone:,} iterations")
         final_solvers[seed] = solver
         final_metrics[seed] = evaluate_strategy(tree, solver.average_policy())
 
@@ -145,7 +145,7 @@ def run_mccfr_validation(
     selected_metrics = final_metrics[selected_seed]
     snapshot_id = f"leduc-mccfr-final-seed-{selected_seed}-iter-{OPTIMISED_MILESTONES[-1]}"
     checkpoint_id = f"leduc-mccfr-final_iter_{OPTIMISED_MILESTONES[-1]}"
-    code_revision = _code_revision()
+    revision = code_revision()
     training_config = TabularTrainingConfig(
         game=GameId.LEDUC.value,
         solver="mccfr",
@@ -171,7 +171,7 @@ def run_mccfr_validation(
             "evaluations_without_improvement": 0,
         },
         metric_records=(),
-        code_revision=code_revision,
+        code_revision=revision,
     )
     export_tabular_snapshot(
         snapshot_path,
@@ -197,8 +197,8 @@ def run_mccfr_validation(
     convergence_path = output_directory / "convergence.csv"
     summary_path = output_directory / "summary.csv"
     plot_path = output_directory / "plots" / "convergence.png"
-    _write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
-    _write_csv(summary_path, _SUMMARY_FIELDS, summary)
+    write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
+    write_csv(summary_path, _SUMMARY_FIELDS, summary)
     plot_mccfr_validation(
         convergence_path,
         summary_path,
@@ -208,7 +208,7 @@ def run_mccfr_validation(
 
     passed = all(bool(check["passed"]) for check in checks)
     validation_path = output_directory / "validation.json"
-    _write_json(
+    write_json(
         validation_path,
         {
             "about": (
@@ -217,7 +217,7 @@ def run_mccfr_validation(
             ),
             "validation_id": VALIDATION_ID,
             "passed": passed,
-            "code_revision": code_revision,
+            "code_revision": revision,
             "configuration": {
                 "game": GameId.LEDUC.value,
                 "seeds": list(SEEDS),
@@ -323,7 +323,7 @@ def _run_reference_records(
     """Generate reference convergence rows when no committed rows are available."""
     records: list[dict[str, object]] = []
     for seed_number, seed in enumerate(SEEDS, start=1):
-        _report_progress(
+        report_progress(
             progress_callback,
             f"reference seed {seed_number}/{len(SEEDS)}: {seed}",
         )
@@ -619,36 +619,3 @@ def _flatten(table: tuple[tuple[float, ...], ...]) -> NDArray[np.float64]:
 def _maximum_difference(first: NDArray[np.float64], second: NDArray[np.float64]) -> float:
     """Return the largest absolute element difference between two arrays."""
     return float(np.max(np.abs(first - second)))
-
-
-def _write_csv(path: Path, fields: tuple[str, ...], records: list[dict[str, object]]) -> None:
-    """Atomically write records using a fixed column order."""
-    with atomic_text_writer(path) as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=list(fields), lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(records)
-
-
-def _write_json(path: Path, values: dict[str, object]) -> None:
-    """Atomically write deterministic, readable JSON."""
-    with atomic_text_writer(path) as output_file:
-        json.dump(values, output_file, indent=2, sort_keys=True)
-        output_file.write("\n")
-
-
-def _code_revision() -> str:
-    """Return the current Git revision and mark uncommitted code."""
-    revision = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    dirty = subprocess.run(("git", "diff", "--quiet"), check=False).returncode != 0
-    return f"{revision}-dirty" if dirty else revision
-
-
-def _report_progress(callback: Callable[[str], None] | None, message: str) -> None:
-    """Send a progress message when the caller supplied one."""
-    if callback is not None:
-        callback(message)
