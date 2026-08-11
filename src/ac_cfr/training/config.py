@@ -164,10 +164,12 @@ class DeepCFRRuntimeConfig:
     inference_batch_size: int
     cpu_threads: int
     device: str
+    traversal_workers: int = 1
 
     def __post_init__(self) -> None:
         _validate_positive_integer("inference_batch_size", self.inference_batch_size)
         _validate_positive_integer("cpu_threads", self.cpu_threads)
+        _validate_positive_integer("traversal_workers", self.traversal_workers)
         if self.device not in {"cpu", "cuda"}:
             raise ValueError("device must be 'cpu' or 'cuda'")
 
@@ -178,14 +180,24 @@ class DeepCFRRuntimeConfig:
     @classmethod
     def from_dict(cls, values: object) -> "DeepCFRRuntimeConfig":
         """Reconstruct and strictly validate stored runtime settings."""
-        if not isinstance(values, dict) or set(values) != {
-            "inference_batch_size",
-            "cpu_threads",
-            "device",
-        }:
+        if not isinstance(values, dict) or set(values) not in (
+            {
+                "inference_batch_size",
+                "cpu_threads",
+                "device",
+            },
+            {
+                "inference_batch_size",
+                "cpu_threads",
+                "device",
+                "traversal_workers",
+            },
+        ):
             raise ValueError("Deep CFR runtime configuration fields are incompatible")
+        parsed = values.copy()
+        parsed.setdefault("traversal_workers", 1)
         try:
-            return cls(**values)
+            return cls(**parsed)
         except (TypeError, ValueError) as error:
             raise ValueError("Deep CFR runtime configuration is invalid") from error
 

@@ -1,5 +1,6 @@
 """Strict TOML configuration loading for Deep CFR runs."""
 
+import os
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -8,8 +9,9 @@ from ac_cfr.common.config import DeepCFRImplementationId
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
-_FORMAT_VERSION = 2
-_RUN_FIELDS = {"implementation", "checkpoint_interval"}
+_FORMAT_VERSION = 3
+_RUN_FIELDS = {"implementation", "checkpoint_interval", "checkpoint_retention"}
+_VERSION_TWO_RUN_FIELDS = _RUN_FIELDS - {"checkpoint_retention"}
 _TRAINING_FIELDS = {
     "iterations",
     "traversals_per_player",
@@ -35,7 +37,8 @@ _LEGACY_TRAINING_FIELDS = _TRAINING_FIELDS - {
     "strategy_batch_size",
     "game_configuration_id",
 } | {"training_batch_size"}
-_RUNTIME_FIELDS = {"inference_batch_size", "cpu_threads", "device"}
+_RUNTIME_FIELDS = {"inference_batch_size", "cpu_threads", "device", "traversal_workers"}
+_VERSION_TWO_RUNTIME_FIELDS = _RUNTIME_FIELDS - {"traversal_workers"}
 
 
 def load_deep_cfr_run_config(
@@ -54,10 +57,14 @@ def load_deep_cfr_run_config(
     format_version = values["format_version"]
     if isinstance(format_version, bool) or not isinstance(format_version, int):
         raise ValueError("Deep CFR configuration format_version is incompatible")
-    if format_version not in (1, _FORMAT_VERSION):
+    if format_version not in (1, 2, _FORMAT_VERSION):
         raise ValueError("Deep CFR configuration format_version is incompatible")
 
-    run = _strict_table(values["run"], _RUN_FIELDS, "run")
+    current_format = format_version == _FORMAT_VERSION
+    run = _strict_table(
+        values["run"], _RUN_FIELDS if current_format else _VERSION_TWO_RUN_FIELDS, "run"
+    )
+    run.setdefault("checkpoint_retention", 2)
     training_fields = _LEGACY_TRAINING_FIELDS if format_version == 1 else _TRAINING_FIELDS
     training = _strict_table(values["training"], training_fields, "training")
     if format_version == 1:
@@ -65,16 +72,26 @@ def load_deep_cfr_run_config(
         training["advantage_batch_size"] = batch_size
         training["strategy_batch_size"] = batch_size
         training["game_configuration_id"] = "leduc"
-    runtime = _strict_table(values["runtime"], _RUNTIME_FIELDS, "runtime")
+    runtime = _strict_table(
+        values["runtime"],
+        _RUNTIME_FIELDS if current_format else _VERSION_TWO_RUNTIME_FIELDS,
+        "runtime",
+    )
+    runtime.setdefault("traversal_workers", 1)
     _apply_overrides(run, training, runtime, overrides or {})
+    _resolve_traversal_workers(runtime)
     try:
         checkpoint_interval = run["checkpoint_interval"]
         if isinstance(checkpoint_interval, bool) or not isinstance(checkpoint_interval, int):
             raise TypeError("checkpoint_interval must be an integer")
+        checkpoint_retention = run["checkpoint_retention"]
+        if isinstance(checkpoint_retention, bool) or not isinstance(checkpoint_retention, int):
+            raise TypeError("checkpoint_retention must be an integer")
         return DeepCFRRunConfig(
             run_id=run_id,
             implementation=DeepCFRImplementationId(run["implementation"]),
             checkpoint_interval=checkpoint_interval,
+            checkpoint_retention=checkpoint_retention,
             training=DeepCFRTrainingConfig.from_dict(training),
             runtime=DeepCFRRuntimeConfig.from_dict(runtime),
         )
@@ -108,3 +125,19 @@ def _apply_overrides(
             )
         else:
             runtime[name] = value
+
+
+def _resolve_traversal_workers(runtime: dict[str, object]) -> None:
+    """Resolve zero once to a bounded machine-aware worker count."""
+    workers = runtime["traversal_workers"]
+    if isinstance(workers, bool) or not isinstance(workers, int):
+        raise ValueError("traversal_workers must be an integer")
+    if workers != 0:
+        return
+    try:
+        available_cpus = len(os.sched_getaffinity(0))
+    except AttributeError:
+        available_cpus = os.cpu_count() or 1
+    # The first cloud target is 12--16 CPUs; avoid blindly spawning dozens of
+    # processes on a larger host before traversal scaling has been measured.
+    runtime["traversal_workers"] = min(14, max(1, available_cpus - 2))

@@ -112,6 +112,41 @@ def test_modified_hulhe_calibration_reuses_one_fixed_reservoir(tmp_path: Path) -
     assert metadata["collection"]["reservoir_digest"] == batch_records[0]["reservoir_digest"]
 
 
+def test_parallel_holdem_collection_preserves_seeded_sample_multiset() -> None:
+    config = _run_config().training
+    game = HoldemConfig.modified()
+    single = DeepCFR(
+        game,
+        config,
+        DeepCFRRuntimeConfig(
+            inference_batch_size=2,
+            cpu_threads=1,
+            device="cpu",
+            traversal_workers=1,
+        ),
+    )
+    parallel = DeepCFR(
+        game,
+        config,
+        DeepCFRRuntimeConfig(
+            inference_batch_size=2,
+            cpu_threads=1,
+            device="cpu",
+            traversal_workers=2,
+        ),
+    )
+
+    single.collect_calibration_traversals(0)
+    parallel.collect_calibration_traversals(0)
+
+    assert sorted(map(repr, single.advantage_reservoirs[0].samples)) == sorted(
+        map(repr, parallel.advantage_reservoirs[0].samples)
+    )
+    assert sorted(map(repr, single.strategy_reservoir.samples)) == sorted(
+        map(repr, parallel.strategy_reservoir.samples)
+    )
+
+
 def _run_config() -> DeepCFRRunConfig:
     """Return the smallest shared modified-HULHE lifecycle configuration."""
     training = DeepCFRTrainingConfig(

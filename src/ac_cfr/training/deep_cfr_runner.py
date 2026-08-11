@@ -1,15 +1,20 @@
 """Checkpointed Deep CFR training with exact evaluation where tractable."""
 
 import json
+import os
 import re
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 
+import psutil
 import torch
 
 from ac_cfr.common.config import DeepCFRImplementationId, GameConfigurationId
+from ac_cfr.common.environment import environment_record
 from ac_cfr.common.provenance import code_revision
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId, UtilityUnit
@@ -25,8 +30,8 @@ from ac_cfr.persistence.deep_cfr_snapshots import (
     deep_cfr_policy,
     export_deep_cfr_snapshot,
 )
-from ac_cfr.persistence.files import atomic_text_writer
-from ac_cfr.persistence.results import DeepCFRMetricStore
+from ac_cfr.persistence.files import atomic_text_writer, write_json
+from ac_cfr.persistence.results import DeepCFRIterationMetricStore, DeepCFRMetricStore
 from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
@@ -44,6 +49,7 @@ class DeepCFRRunConfig:
     checkpoint_interval: int
     training: DeepCFRTrainingConfig
     runtime: DeepCFRRuntimeConfig
+    checkpoint_retention: int = 2
 
     def __post_init__(self) -> None:
         if not isinstance(self.run_id, str) or _IDENTIFIER_PATTERN.fullmatch(self.run_id) is None:
@@ -56,6 +62,12 @@ class DeepCFRRunConfig:
             raise TypeError("checkpoint_interval must be an integer")
         if self.checkpoint_interval < 1:
             raise ValueError("checkpoint_interval must be positive")
+        if isinstance(self.checkpoint_retention, bool) or not isinstance(
+            self.checkpoint_retention, int
+        ):
+            raise TypeError("checkpoint_retention must be an integer")
+        if self.checkpoint_retention < 1:
+            raise ValueError("checkpoint_retention must be positive")
         if not isinstance(self.training, DeepCFRTrainingConfig):
             raise TypeError("training must be a DeepCFRTrainingConfig")
         if not isinstance(self.runtime, DeepCFRRuntimeConfig):
@@ -72,6 +84,7 @@ class DeepCFRRunConfig:
             "run_id": self.run_id,
             "implementation": self.implementation.value,
             "checkpoint_interval": self.checkpoint_interval,
+            "checkpoint_retention": self.checkpoint_retention,
             "training": self.training.to_dict(),
             "runtime": self.runtime.to_dict(),
         }
@@ -79,19 +92,30 @@ class DeepCFRRunConfig:
     @classmethod
     def from_dict(cls, values: object) -> "DeepCFRRunConfig":
         """Reconstruct and validate one stored run configuration."""
-        if not isinstance(values, dict) or set(values) != {
-            "run_id",
-            "implementation",
-            "checkpoint_interval",
-            "training",
-            "runtime",
-        }:
+        if not isinstance(values, dict) or set(values) not in (
+            {
+                "run_id",
+                "implementation",
+                "checkpoint_interval",
+                "training",
+                "runtime",
+            },
+            {
+                "run_id",
+                "implementation",
+                "checkpoint_interval",
+                "checkpoint_retention",
+                "training",
+                "runtime",
+            },
+        ):
             raise ValueError("Deep CFR run configuration fields are incompatible")
         try:
             return cls(
                 run_id=values["run_id"],
                 implementation=DeepCFRImplementationId(values["implementation"]),
                 checkpoint_interval=values["checkpoint_interval"],
+                checkpoint_retention=values.get("checkpoint_retention", 2),
                 training=DeepCFRTrainingConfig.from_dict(values["training"]),
                 runtime=DeepCFRRuntimeConfig.from_dict(values["runtime"]),
             )
@@ -114,6 +138,7 @@ def start_deep_cfr_training(
     *,
     runs_root: Path = Path("runs"),
     progress_callback: Callable[[int, int], None] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> DeepCFRTrainingOutcome:
     """Start one configured Deep CFR implementation in a new directory."""
     if not isinstance(config, DeepCFRRunConfig):
@@ -131,6 +156,11 @@ def start_deep_cfr_training(
         solver = deep_cfr_solver_type(config.implementation)(game, config.training, config.runtime)
     revision = code_revision()
     _write_run_config(run_directory / "run_config.json", config, revision)
+    write_json(
+        run_directory / "environment.json",
+        environment_record("torch", "numpy", "psutil", device=config.runtime.device),
+    )
+    _append_training_log(run_directory, "training started at iteration 0")
     return _execute_schedule(
         config=config,
         solver=solver,
@@ -139,6 +169,7 @@ def start_deep_cfr_training(
         elapsed_training_seconds=0.0,
         revision=revision,
         progress_callback=progress_callback,
+        stop_requested=stop_requested,
     )
 
 
@@ -146,6 +177,7 @@ def resume_deep_cfr_training(
     checkpoint_path: Path,
     *,
     progress_callback: Callable[[int, int], None] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> DeepCFRTrainingOutcome:
     """Resume the configured Deep CFR implementation from a complete iteration."""
     run_directory = checkpoint_path.parent.parent
@@ -162,6 +194,16 @@ def resume_deep_cfr_training(
         raise ValueError("checkpoint runtime configuration does not match run_config.json")
     if config.implementation is not deep_cfr_implementation(loaded.solver):
         raise ValueError("checkpoint implementation does not match run_config.json")
+    resume_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    write_json(
+        run_directory
+        / f"resume_environment_iter_{loaded.solver.iteration}_{resume_timestamp}.json",
+        environment_record("torch", "numpy", "psutil", device=config.runtime.device),
+    )
+    _append_training_log(
+        run_directory,
+        f"training resumed from iteration {loaded.solver.iteration}",
+    )
     result_store = DeepCFRMetricStore(run_directory / "metrics.csv")
     raw_records = loaded.run_state["metric_records"]
     if not isinstance(raw_records, list):
@@ -175,6 +217,7 @@ def resume_deep_cfr_training(
         elapsed_training_seconds=float(loaded.run_state["elapsed_training_seconds"]),
         revision=code_revision(),
         progress_callback=progress_callback,
+        stop_requested=stop_requested,
     )
 
 
@@ -187,31 +230,42 @@ def _execute_schedule(
     elapsed_training_seconds: float,
     revision: str,
     progress_callback: Callable[[int, int], None] | None,
+    stop_requested: Callable[[], bool] | None,
 ) -> DeepCFRTrainingOutcome:
-    """Run pending checkpoint and average-strategy milestones in order."""
+    """Run pending iterations and stop only at complete recovery boundaries."""
     total_iterations = config.training.iterations
     snapshot_paths: list[Path] = []
+    iteration_store = DeepCFRIterationMetricStore(run_directory / "iteration_metrics.csv")
+    iteration_store.retain_through(solver.iteration)
     if progress_callback is not None:
         progress_callback(solver.iteration, total_iterations)
-    for milestone in _remaining_milestones(config, solver.iteration, progress_callback is not None):
-        start_time = perf_counter()
-        solver.train(milestone - solver.iteration)
-        elapsed_training_seconds += perf_counter() - start_time
+    stopped = False
+    while solver.iteration < total_iterations:
+        iteration_started = perf_counter()
+        if config.runtime.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+        training_started = perf_counter()
+        solver.train(1)
+        elapsed_training_seconds += perf_counter() - training_started
+        iteration = solver.iteration
 
         should_snapshot = (
-            milestone in config.training.snapshot_iterations or milestone == total_iterations
+            iteration in config.training.snapshot_iterations or iteration == total_iterations
         )
-        should_checkpoint = milestone % config.checkpoint_interval == 0 or should_snapshot
-        checkpoint_id = f"{config.run_id}_iter_{milestone}" if should_checkpoint else ""
+        should_checkpoint = iteration % config.checkpoint_interval == 0 or should_snapshot
+        requested_stop = stop_requested is not None and stop_requested()
+        should_checkpoint = should_checkpoint or requested_stop
+        checkpoint_id = f"{config.run_id}_iter_{iteration}" if should_checkpoint else ""
+        snapshot_id = ""
         if should_snapshot:
             network = (
                 solver.final_strategy_network
-                if milestone == total_iterations
-                else solver.snapshot_networks[milestone]
+                if iteration == total_iterations
+                else solver.snapshot_networks[iteration]
             )
             if network is None:
                 raise RuntimeError("scheduled Deep CFR strategy network was not trained")
-            snapshot_id = f"{config.run_id}_iter_{milestone}"
+            snapshot_id = f"{config.run_id}_iter_{iteration}"
             snapshot_path = run_directory / "strategy_snapshots" / f"{snapshot_id}.pt"
             export_deep_cfr_snapshot(
                 snapshot_path,
@@ -220,7 +274,7 @@ def _execute_schedule(
                 config=config.training,
                 implementation=config.implementation,
                 snapshot_id=snapshot_id,
-                iteration=milestone,
+                iteration=iteration,
                 run_id=config.run_id,
                 source_checkpoint_id=checkpoint_id,
             )
@@ -236,7 +290,7 @@ def _execute_schedule(
             )
 
         if should_checkpoint:
-            _save_checkpoint_pair(
+            _save_recovery_checkpoint(
                 run_directory=run_directory,
                 solver=solver,
                 config=config,
@@ -245,13 +299,34 @@ def _execute_schedule(
                 metric_records=result_store.records,
                 revision=revision,
             )
+        iteration_seconds = perf_counter() - iteration_started
+        _record_iteration_diagnostics(
+            store=iteration_store,
+            solver=solver,
+            config=config,
+            run_directory=run_directory,
+            snapshot_id=snapshot_id,
+            elapsed_training_seconds=elapsed_training_seconds,
+            iteration_seconds=iteration_seconds,
+        )
+        _append_training_log(
+            run_directory,
+            f"iteration {iteration}/{total_iterations} completed in {iteration_seconds:.6g}s",
+        )
         if progress_callback is not None:
             progress_callback(solver.iteration, total_iterations)
+        if requested_stop:
+            stopped = True
+            _append_training_log(
+                run_directory,
+                f"stop requested; recovery checkpoint saved at iteration {iteration}",
+            )
+            break
 
     latest_checkpoint = run_directory / "checkpoints" / "latest.pt"
     if not latest_checkpoint.exists():
         checkpoint_id = f"{config.run_id}_iter_{solver.iteration}"
-        _save_checkpoint_pair(
+        _save_recovery_checkpoint(
             run_directory=run_directory,
             solver=solver,
             config=config,
@@ -266,6 +341,8 @@ def _execute_schedule(
         final_iteration=solver.iteration,
         snapshot_paths=tuple(snapshot_paths),
     )
+    if not stopped and solver.iteration == total_iterations:
+        _append_training_log(run_directory, f"training completed at iteration {solver.iteration}")
     _write_summary(outcome, result_store)
     return outcome
 
@@ -344,22 +421,100 @@ def _network_metric(
     return matches[0]
 
 
-def _remaining_milestones(
+def _record_iteration_diagnostics(
+    *,
+    store: DeepCFRIterationMetricStore,
+    solver: NaiveDeepCFR,
     config: DeepCFRRunConfig,
-    completed: int,
-    include_progress: bool,
-) -> tuple[int, ...]:
-    """Merge checkpoint, snapshot, final and optional progress boundaries."""
-    total = config.training.iterations
-    milestones = set(range(config.checkpoint_interval, total + 1, config.checkpoint_interval))
-    milestones.update(config.training.snapshot_iterations)
-    if include_progress:
-        milestones.update((total * percentage + 99) // 100 for percentage in range(5, 101, 5))
-    milestones.add(total)
-    return tuple(sorted(iteration for iteration in milestones if iteration > completed))
+    run_directory: Path,
+    snapshot_id: str,
+    elapsed_training_seconds: float,
+    iteration_seconds: float,
+) -> None:
+    """Persist loss, timing, reservoir, memory, GPU, and disk diagnostics."""
+    player_metrics = tuple(
+        _network_metric(solver.training_metrics, solver.iteration, "advantage", player)
+        for player in (0, 1)
+    )
+    strategy_metrics = tuple(
+        metric
+        for metric in solver.training_metrics
+        if metric.iteration == solver.iteration
+        and metric.network_role == "strategy"
+        and metric.player is None
+    )
+    if len(strategy_metrics) > 1:
+        raise RuntimeError("Deep CFR strategy training metrics are ambiguous")
+    strategy_metric = strategy_metrics[0] if strategy_metrics else None
+    reservoirs = (*solver.advantage_reservoirs, solver.strategy_reservoir)
+    samples_seen_values: list[int] = []
+    for reservoir in reservoirs:
+        value = reservoir.training_state()["samples_seen"]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise RuntimeError("Deep CFR reservoir sample count is invalid")
+        samples_seen_values.append(value)
+    samples_seen = tuple(samples_seen_values)
+    phase_times = solver.recent_training_times
+    if config.runtime.device == "cuda":
+        peak_allocated = torch.cuda.max_memory_allocated()
+        peak_reserved = torch.cuda.max_memory_reserved()
+    else:
+        peak_allocated = 0
+        peak_reserved = 0
+    game = (
+        GameId.HOLD_EM.value
+        if config.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE
+        else GameId.LEDUC.value
+    )
+    store.upsert(
+        {
+            "game": game,
+            "game_version": config.training.game_configuration_id.value,
+            "solver": config.implementation.value,
+            "run_id": config.run_id,
+            "strategy_snapshot_id": snapshot_id,
+            "iteration": solver.iteration,
+            "seed": config.training.seed,
+            "elapsed_training_seconds": elapsed_training_seconds,
+            "iteration_seconds": iteration_seconds,
+            "traversal_seconds": phase_times.traversal_seconds,
+            "advantage_training_seconds": phase_times.advantage_training_seconds,
+            "strategy_training_seconds": phase_times.strategy_training_seconds,
+            "player_zero_advantage_training_loss": player_metrics[0].training_loss,
+            "player_zero_advantage_validation_loss": player_metrics[0].validation_loss,
+            "player_one_advantage_training_loss": player_metrics[1].training_loss,
+            "player_one_advantage_validation_loss": player_metrics[1].validation_loss,
+            "strategy_training_loss": (
+                None if strategy_metric is None else strategy_metric.training_loss
+            ),
+            "strategy_validation_loss": (
+                None if strategy_metric is None else strategy_metric.validation_loss
+            ),
+            "player_zero_advantage_samples_retained": len(reservoirs[0]),
+            "player_zero_advantage_samples_seen": samples_seen[0],
+            "player_one_advantage_samples_retained": len(reservoirs[1]),
+            "player_one_advantage_samples_seen": samples_seen[1],
+            "strategy_samples_retained": len(reservoirs[2]),
+            "strategy_samples_seen": samples_seen[2],
+            "process_rss_bytes": psutil.Process().memory_info().rss,
+            "cuda_peak_allocated_bytes": peak_allocated,
+            "cuda_peak_reserved_bytes": peak_reserved,
+            "free_disk_bytes": shutil.disk_usage(run_directory).free,
+        }
+    )
 
 
-def _save_checkpoint_pair(
+def _append_training_log(run_directory: Path, message: str) -> None:
+    """Durably append one concise lifecycle event without buffering it in memory."""
+    run_directory.mkdir(parents=True, exist_ok=True)
+    with (run_directory / "train.log").open("a", encoding="utf-8") as log_file:
+        timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+        log_file.write(f"{timestamp} {message}\n")
+        log_file.flush()
+        os.fsync(log_file.fileno())
+
+
+def _save_recovery_checkpoint(
     *,
     run_directory: Path,
     solver: NaiveDeepCFR,
@@ -369,8 +524,10 @@ def _save_checkpoint_pair(
     metric_records: tuple[dict[str, str], ...],
     revision: str,
 ) -> None:
-    """Save an iteration checkpoint and atomically update the latest alias."""
+    """Save one recovery file, atomically repoint latest, and prune old files."""
     checkpoint_directory = run_directory / "checkpoints"
+    checkpoint_directory.mkdir(parents=True, exist_ok=True)
+    _require_checkpoint_space(checkpoint_directory, solver)
     arguments = {
         "solver": solver,
         "run_id": config.run_id,
@@ -379,11 +536,69 @@ def _save_checkpoint_pair(
         "elapsed_training_seconds": elapsed_training_seconds,
         "metric_records": metric_records,
     }
-    save_deep_cfr_checkpoint(
-        checkpoint_directory / f"iter_{solver.iteration}.pt",
-        **arguments,
+    iteration_path = checkpoint_directory / f"iter_{solver.iteration}.pt"
+    save_deep_cfr_checkpoint(iteration_path, **arguments)
+    _replace_latest_symlink(iteration_path, checkpoint_directory / "latest.pt")
+    _prune_recovery_checkpoints(checkpoint_directory, config.checkpoint_retention)
+
+
+def _require_checkpoint_space(directory: Path, solver: NaiveDeepCFR) -> None:
+    """Fail before serialisation when one atomic checkpoint cannot fit."""
+    occupied_bytes = 0
+    reservoirs = (*solver.advantage_reservoirs, solver.strategy_reservoir)
+    for reservoir in reservoirs:
+        arrays = getattr(reservoir, "arrays", None)
+        if arrays is None:
+            occupied_bytes += sum(len(repr(sample)) for sample in reservoir.samples)
+            continue
+        occupied_bytes += sum(array.nbytes for array in arrays)
+        # Checkpoints widen packed uint32 iteration numbers to int64.
+        occupied_bytes += len(reservoir) * 4
+    network_bytes = sum(
+        parameter.numel() * parameter.element_size()
+        for network in (
+            *solver.advantage_networks,
+            *solver.snapshot_networks.values(),
+            solver.final_strategy_network,
+        )
+        if network is not None
+        for parameter in network.parameters()
     )
-    save_deep_cfr_checkpoint(checkpoint_directory / "latest.pt", **arguments)
+    estimated_bytes = occupied_bytes + network_bytes
+    required_bytes = int(estimated_bytes * 1.1) + 64 * 1024 * 1024
+    free_bytes = shutil.disk_usage(directory).free
+    if free_bytes < required_bytes:
+        raise OSError(
+            "insufficient free space for an atomic Deep CFR checkpoint: "
+            f"need approximately {required_bytes:,} bytes, found {free_bytes:,}"
+        )
+
+
+def _replace_latest_symlink(source: Path, target: Path) -> None:
+    """Atomically point latest.pt at one same-directory checkpoint."""
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        temporary.symlink_to(source.name)
+        os.replace(temporary, target)
+        descriptor = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _prune_recovery_checkpoints(directory: Path, retention: int) -> None:
+    """Retain only the newest bounded set of complete iteration checkpoints."""
+    checkpoints: list[tuple[int, Path]] = []
+    for path in directory.glob("iter_*.pt"):
+        match = re.fullmatch(r"iter_(\d+)\.pt", path.name)
+        if match is not None and path.is_file() and not path.is_symlink():
+            checkpoints.append((int(match.group(1)), path))
+    for _, path in sorted(checkpoints)[:-retention]:
+        path.unlink()
 
 
 def _write_run_config(path: Path, config: DeepCFRRunConfig, revision: str) -> None:
@@ -436,6 +651,14 @@ def _load_run_config(path: Path) -> DeepCFRRunConfig:
 def _write_summary(outcome: DeepCFRTrainingOutcome, store: DeepCFRMetricStore) -> None:
     """Write a concise human-readable summary from the final exact measurement."""
     if not store.records:
+        with atomic_text_writer(outcome.run_directory / "summary.txt") as summary_file:
+            summary_file.write(f"Run: {outcome.run_directory.name}\n")
+            summary_file.write(f"Completed iterations: {outcome.final_iteration:,}\n")
+            summary_file.write(
+                "Latest recovery checkpoint: "
+                f"{outcome.latest_checkpoint.relative_to(outcome.run_directory)}\n"
+            )
+            summary_file.write("Strategy snapshot: not yet scheduled\n")
         return
     record = max(store.records, key=lambda value: int(value["iteration"]))
     common_lines = (
@@ -445,8 +668,9 @@ def _write_summary(outcome: DeepCFRTrainingOutcome, store: DeepCFRMetricStore) -
         f"Iterations: {int(record['iteration']):,}",
         f"Traversals: {int(record['traversals']):,}",
         f"Solver training time: {float(record['elapsed_training_seconds']):.6g} seconds",
-        f"Final checkpoint: {outcome.latest_checkpoint.relative_to(outcome.run_directory)}",
-        f"Final strategy snapshot: strategy_snapshots/{record['strategy_snapshot_id']}.pt",
+        "Latest recovery checkpoint: "
+        f"{outcome.latest_checkpoint.relative_to(outcome.run_directory)}",
+        f"Latest strategy snapshot: strategy_snapshots/{record['strategy_snapshot_id']}.pt",
     )
     lines = common_lines
     if record["exploitability"]:

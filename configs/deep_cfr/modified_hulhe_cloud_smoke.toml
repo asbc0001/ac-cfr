@@ -1,6 +1,6 @@
 format_version = 3
 
-# Tiny local lifecycle check only; this preset is not suitable for strategy training.
+# Cheap end-to-end CUDA and persistent-storage check before cloud calibration.
 [run]
 implementation = "optimised"
 checkpoint_interval = 1
@@ -29,5 +29,6 @@ optimizer_id = "adam"
 [runtime]
 inference_batch_size = 256
 cpu_threads = 1
-device = "cpu"
-traversal_workers = 1
+device = "cuda"
+# Resolve once from the cloud machine's available CPU affinity.
+traversal_workers = 0

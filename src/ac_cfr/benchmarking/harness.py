@@ -1,19 +1,15 @@
 """Repeated fixed-workload timings for tabular poker solvers."""
 
-import platform
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from importlib.metadata import version
 from multiprocessing import get_context
 from multiprocessing.connection import Connection
-from pathlib import Path
 from statistics import median
 from time import perf_counter
 
 import psutil
 
-from ac_cfr.common.provenance import code_revision
+from ac_cfr.common.environment import environment_record as environment_record
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId
 from ac_cfr.games.tabular import create_tabular_game
@@ -60,40 +56,6 @@ class BenchmarkResult:
     exploitability: float
     nash_conv: float
     repeat_results: tuple[BenchmarkRepeat, ...]
-
-
-def environment_record(
-    *packages: str,
-    device: str | None = None,
-) -> dict[str, object]:
-    """Return consistent hardware, software, and source provenance metadata."""
-    process = psutil.Process()
-    is_wsl2 = "microsoft" in platform.release().lower()
-    record: dict[str, object] = {
-        "code_revision": code_revision(),
-        "python": platform.python_version(),
-        "platform": platform.platform(),
-        "machine": platform.machine(),
-        "processor": platform.processor(),
-        "logical_cpu_count": psutil.cpu_count(logical=True),
-        "physical_cpu_count": psutil.cpu_count(logical=False),
-        "available_cpu_count": (
-            len(process.cpu_affinity()) if hasattr(process, "cpu_affinity") else None
-        ),
-        "available_memory_bytes": psutil.virtual_memory().available,
-        "total_memory_bytes": psutil.virtual_memory().total,
-        "wsl2": is_wsl2,
-        "wsl_config_paths": (
-            sorted(str(path) for path in Path("/mnt/c/Users").glob("*/.wslconfig"))
-            if is_wsl2
-            else []
-        ),
-        "executable": sys.executable,
-    }
-    record.update((package, version(package)) for package in packages)
-    if device is not None:
-        record["device"] = device
-    return record
 
 
 def report_progress(callback: Callable[[str], None] | None, message: str) -> None:

@@ -50,6 +50,38 @@ DEEP_CFR_METRIC_FIELDS: Final = (
 )
 DEEP_CFR_METRIC_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
 
+DEEP_CFR_ITERATION_FIELDS: Final = (
+    "game",
+    "game_version",
+    "solver",
+    "run_id",
+    "strategy_snapshot_id",
+    "iteration",
+    "seed",
+    "elapsed_training_seconds",
+    "iteration_seconds",
+    "traversal_seconds",
+    "advantage_training_seconds",
+    "strategy_training_seconds",
+    "player_zero_advantage_training_loss",
+    "player_zero_advantage_validation_loss",
+    "player_one_advantage_training_loss",
+    "player_one_advantage_validation_loss",
+    "strategy_training_loss",
+    "strategy_validation_loss",
+    "player_zero_advantage_samples_retained",
+    "player_zero_advantage_samples_seen",
+    "player_one_advantage_samples_retained",
+    "player_one_advantage_samples_seen",
+    "strategy_samples_retained",
+    "strategy_samples_seen",
+    "process_rss_bytes",
+    "cuda_peak_allocated_bytes",
+    "cuda_peak_reserved_bytes",
+    "free_disk_bytes",
+)
+DEEP_CFR_ITERATION_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
+
 EVALUATION_RESULT_FIELDS: Final = (
     "game",
     "game_version",
@@ -163,6 +195,35 @@ class DeepCFRMetricStore:
 
     def replace(self, records: list[dict[str, object]]) -> None:
         """Replace all Deep CFR measurements after checkpoint validation."""
+        self._store.replace(records)
+
+
+class DeepCFRIterationMetricStore:
+    """Store lightweight operational diagnostics after every completed iteration."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, path: Path) -> None:
+        self._store = _CsvRecordStore(
+            path,
+            fields=DEEP_CFR_ITERATION_FIELDS,
+            key_fields=DEEP_CFR_ITERATION_KEY_FIELDS,
+        )
+
+    @property
+    def records(self) -> tuple[ResultRecord, ...]:
+        """Return independent copies of the current records."""
+        return self._store.records
+
+    def upsert(self, values: dict[str, object]) -> None:
+        """Insert or replace one completed-iteration diagnostic record."""
+        self._store.upsert(values)
+
+    def retain_through(self, iteration: int) -> None:
+        """Discard records newer than a resumed recovery checkpoint."""
+        records: list[dict[str, object]] = [
+            dict(record) for record in self.records if int(record["iteration"]) <= iteration
+        ]
         self._store.replace(records)
 
 

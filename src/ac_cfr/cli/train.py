@@ -1,8 +1,12 @@
 """Command-line entry point for checkpointed poker-solver training."""
 
 import argparse
-from collections.abc import Callable, Sequence
+import json
+import signal
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
+from threading import Event
 
 from ac_cfr.common.config import DeepCFRImplementationId, ModelConfigId
 from ac_cfr.evaluation.plotting import (
@@ -11,6 +15,7 @@ from ac_cfr.evaluation.plotting import (
 )
 from ac_cfr.persistence.results import DeepCFRMetricStore, TrainingMetricStore
 from ac_cfr.training.deep_cfr_config import load_deep_cfr_run_config
+from ac_cfr.training.deep_cfr_preflight import preflight_deep_cfr
 from ac_cfr.training.deep_cfr_runner import (
     DEEP_CFR_SOLVER_ID,
     DeepCFRRunConfig,
@@ -37,6 +42,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         or (arguments.resume is not None and arguments.resume.suffix == ".pt")
     )
     if arguments.resume is not None:
+        if arguments.preflight:
+            parser.error("--preflight cannot be combined with --resume")
         if any(
             value is not None
             for value in (
@@ -49,6 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.runs_root,
                 arguments.evaluation_interval,
                 arguments.checkpoint_interval,
+                arguments.checkpoint_retention,
                 arguments.implementation,
                 arguments.snapshot_iterations,
                 arguments.averaging_delay,
@@ -63,6 +71,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.strategy_batch_size,
                 arguments.inference_batch_size,
                 arguments.cpu_threads,
+                arguments.traversal_workers,
                 arguments.device,
                 arguments.model_config_id,
                 arguments.learning_rate,
@@ -72,11 +81,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         ):
             parser.error("--resume cannot be combined with new-run options")
-        outcome = (
-            resume_deep_cfr_training(arguments.resume, progress_callback=report_progress)
-            if is_deep_cfr
-            else resume_tabular_training(arguments.resume, progress_callback=report_progress)
-        )
+        if is_deep_cfr:
+            with _termination_stop_request() as stop_event:
+                outcome = resume_deep_cfr_training(
+                    arguments.resume,
+                    progress_callback=report_progress,
+                    stop_requested=stop_event.is_set,
+                )
+        else:
+            outcome = resume_tabular_training(
+                arguments.resume,
+                progress_callback=report_progress,
+            )
     else:
         if arguments.config is None and (
             arguments.game is None or arguments.solver is None or arguments.iterations is None
@@ -113,11 +129,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "averaging, or early-stopping options"
                 )
             deep_config = _deep_cfr_config(arguments, snapshots)
-            outcome = start_deep_cfr_training(
-                deep_config,
-                runs_root=Path("runs") if arguments.runs_root is None else arguments.runs_root,
-                progress_callback=report_progress,
-            )
+            runs_root = Path("runs") if arguments.runs_root is None else arguments.runs_root
+            if arguments.preflight:
+                if arguments.plot:
+                    parser.error("--preflight cannot be combined with --plot")
+                print(json.dumps(preflight_deep_cfr(deep_config, runs_root), indent=2))
+                return 0
+            with _termination_stop_request() as stop_event:
+                outcome = start_deep_cfr_training(
+                    deep_config,
+                    runs_root=runs_root,
+                    progress_callback=report_progress,
+                    stop_requested=stop_event.is_set,
+                )
         else:
             _reject_deep_cfr_options(parser, arguments)
             assert arguments.game is not None
@@ -186,6 +210,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--evaluation-interval", type=int)
     parser.add_argument("--checkpoint-interval", type=int)
+    parser.add_argument("--checkpoint-retention", type=int)
     parser.add_argument(
         "--implementation",
         choices=tuple(implementation.value for implementation in DeepCFRImplementationId),
@@ -217,6 +242,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--strategy-batch-size", type=int)
     parser.add_argument("--inference-batch-size", type=int)
     parser.add_argument("--cpu-threads", type=int)
+    parser.add_argument("--traversal-workers", type=int)
     parser.add_argument("--device", choices=("cpu", "cuda"))
     parser.add_argument(
         "--model-config-id",
@@ -230,6 +256,11 @@ def _parser() -> argparse.ArgumentParser:
         "--plot",
         action="store_true",
         help="Create training diagnostics after training.",
+    )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Check Deep CFR paths, resources, device execution, and one tiny traversal.",
     )
     return parser
 
@@ -264,6 +295,27 @@ def _progress_reporter() -> Callable[[int, int], None]:
             print(f"progress: {rounded_percentage}% ({completed}/{total} iterations)")
 
     return report
+
+
+@contextmanager
+def _termination_stop_request() -> Iterator[Event]:
+    """Convert SIGINT and SIGTERM into a request to stop at a safe boundary."""
+    stop_event = Event()
+    previous_handlers = {
+        signal_number: signal.getsignal(signal_number)
+        for signal_number in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    def request_stop(_signal_number: int, _frame: object) -> None:
+        stop_event.set()
+
+    try:
+        for signal_number in previous_handlers:
+            signal.signal(signal_number, request_stop)
+        yield stop_event
+    finally:
+        for signal_number, handler in previous_handlers.items():
+            signal.signal(signal_number, handler)
 
 
 def _print_final_metrics(metrics_path: Path, *, deep_cfr: bool) -> None:
@@ -314,6 +366,7 @@ def _deep_cfr_overrides(
         "iterations",
         "seed",
         "checkpoint_interval",
+        "checkpoint_retention",
         "implementation",
         "traversals_per_player",
         "advantage_reservoir_capacity",
@@ -324,6 +377,7 @@ def _deep_cfr_overrides(
         "strategy_batch_size",
         "inference_batch_size",
         "cpu_threads",
+        "traversal_workers",
         "device",
         "learning_rate",
         "validation_fraction",
@@ -344,6 +398,7 @@ def _reject_deep_cfr_options(
 ) -> None:
     """Reject neural-only options when a tabular solver was selected."""
     names = (
+        "checkpoint_retention",
         "traversals_per_player",
         "advantage_reservoir_capacity",
         "strategy_reservoir_capacity",
@@ -353,6 +408,7 @@ def _reject_deep_cfr_options(
         "strategy_batch_size",
         "inference_batch_size",
         "cpu_threads",
+        "traversal_workers",
         "device",
         "model_config_id",
         "learning_rate",
@@ -363,3 +419,5 @@ def _reject_deep_cfr_options(
     )
     if any(getattr(arguments, name) is not None for name in names):
         parser.error("Deep CFR options require --solver deep_cfr")
+    if arguments.preflight:
+        parser.error("--preflight requires a Deep CFR configuration")
