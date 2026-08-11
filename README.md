@@ -1,12 +1,12 @@
 # AC CFR
 
-A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It currently includes complete reference and optimised CFR, CFR+, and external-sampling MCCFR pipelines, plus reference and optimised Deep CFR implementations for Leduc and the shared Hold'em foundations.
+A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It includes complete reference and optimised CFR, CFR+, external-sampling MCCFR, and Leduc Deep CFR pipelines, plus the shared Hold'em foundations.
 
 ## Current functionality
 
-- Complete Kuhn and Leduc engines with reference and optimised CFR, CFR+, and MCCFR solvers.
-- Exact evaluation, checkpointed training, snapshots, plotting, and reproducible benchmarks.
-- Validated tabular agents and a checksum-protected strategy registry.
+- Complete Kuhn and Leduc engines with reference and optimised tabular solvers, plus Leduc Deep CFR.
+- Exact evaluation, resumable training, playable snapshots, plotting, and reproducible benchmarks.
+- Validated tabular and neural agents with a checksum-protected strategy registry.
 - Conventional and modified HULHE engines with compact cards, fast evaluation, and suit-canonical information states.
 
 ## CFR and CFR+
@@ -31,9 +31,19 @@ Each outer iteration performs one sampled traversal for Player 0 and one for Pla
 
 One MCCFR iteration is much cheaper than one full-tree CFR iteration because it visits only part of the tree. Raw iteration counts therefore cannot rank CFR and MCCFR directly. Convergence over training time and fixed-workload throughput provide more meaningful comparisons.
 
+## Deep CFR
+
+Deep CFR keeps MCCFR's sampled traversal but replaces regret and average-strategy tables with neural networks. Each player's advantage network predicts the relative value of every action; regret matching turns positive predictions into the current strategy, falling back to the highest prediction if none are positive. A separate shared strategy network learns the strategy history and becomes the playable average policy.
+
+Each outer iteration gives both players `K` sampled traversals. Their targets enter bounded uniform reservoirs, where every sample seen has an equal chance of being retained. Fresh advantage networks train for fixed numbers of sampled minibatch updates, weighted by generating iteration under Linear CFR. Fixed update budgets stop neural-training cost growing automatically with reservoir size. Exported strategy networks train separately from the shared strategy reservoir and never feed back into traversal.
+
+Leduc uses a versioned 37-value encoding of the acting player, cards, betting round, and action history. The selected network has three 64-unit ReLU hidden layers and three masked action outputs. Held-out losses, finite-value checks, and gradient clipping guard training; dropout remained disabled because validation showed no benefit.
+
+The final preset uses 1,000 traversals and 1,000 advantage updates per player per iteration, 512-sample batches, and 100,000-sample reservoirs. The complete configuration is in [`configs/deep_cfr/leduc_final.toml`](configs/deep_cfr/leduc_final.toml).
+
 ## Implementations and optimisation
 
-Recursive Python solvers provide an independent correctness baseline. The optimised solvers preserve their update order and mathematics while using:
+Recursive Python tabular solvers provide an independent correctness baseline. Their optimised counterparts preserve the update order and mathematics while using:
 
 - precomputed dense indexed trees with stable node, information-set, child, depth, and action indices;
 - compact flat NumPy arrays instead of nested Python objects and dictionaries in the hot path;
@@ -43,6 +53,8 @@ Recursive Python solvers provide an independent correctness baseline. The optimi
 - a cached Numba-compiled training kernel that moves the repeated numerical loops into machine code.
 
 NumPy provides the arrays, while Numba compiles the training kernel into machine code. Benchmarks warm this compilation separately so it is not counted as solver training.
+
+Optimised Deep CFR batches network inference across pending traversal states, stores reservoir samples in packed arrays, and replaces recursive Python traversal bookkeeping with reusable indexed buffers. These changes reduce Python-visible calls and network invocations while preserving the algorithmic work and learning semantics used by the matched reference comparison.
 
 ## Exact evaluation
 
@@ -56,21 +68,26 @@ All Kuhn and Leduc values use the games' base chip unit and are reported per han
 
 The optimised CFR/CFR+ solvers matched reference regrets, strategy sums, and policies to an absolute tolerance of `1e-12` in all eight deterministic comparisons. MCCFR also matched its reference updates within `1e-12` when given identical sampled draws. Longer convergence checks and duplicate-deal, swapped-seat self-play passed for all three algorithms.
 
-| Game | Policy | Final training iterations | Final exploitability | Fixed-benchmark speedup |
+| Game | Policy | Training budget / selected snapshot | Final exploitability | Fixed-benchmark speedup |
 |---|---|---:|---:|---:|
 | Kuhn | CFR | 100,000 | 0.00001719 | 27.3x |
 | Kuhn | CFR+ | 100,000 | 0.00000215 | 27.5x |
 | Leduc | CFR | 500,000 | 0.00014595 | 131.8x |
 | Leduc | CFR+ | 500,000 | 0.00000017 | 138.3x |
 | Leduc | MCCFR | 20,000,000 | 0.00450098 | 42.7x |
+| Leduc | Deep CFR | 200; selected 150 | 0.20564932 | 6.55x |
 
 Final CFR/CFR+ policies use larger budgets than their validation and benchmark workloads. Kuhn policies train for 100,000 iterations rather than 10,000. Leduc policies train for 500,000 rather than 5,000, with the larger budget chosen from CFR's measured convergence to pass the `0.0005` final-policy target.
 
 MCCFR was trained to 20,000,000 iterations across five seeds. Median exact exploitability reached `0.004501`, below the established `0.005` validation ceiling. The seed with the median final result was selected rather than the best seed, avoiding a cherry-picked final policy. That policy is registered as `leduc_mccfr_final`.
 
-CFR/CFR+ benchmarks use 10,000 Kuhn and 5,000 Leduc iterations. The MCCFR benchmark uses 500,000 Leduc iterations, or 1,000,000 sampled traversals, giving the optimised workload more than one second of measured training. Each benchmark uses five fresh-process repetitions after Numba warm-up and records median runtime, variation, traversals per second, and peak process-tree memory.
+The final optimised Deep CFR run completed 200 outer iterations and 400,000 sampled traversals. Exact evaluation selected iteration 150 at `0.205649` exploitability instead of the weaker final snapshot. Iterations 20, 75, and 150 are registered as early, intermediate, and final policies. This validates the neural training and playable-policy lifecycle; it does not claim parity with the stronger tabular policies.
+
+CFR/CFR+ benchmarks use 10,000 Kuhn and 5,000 Leduc iterations. The MCCFR benchmark uses 500,000 Leduc iterations, or 1,000,000 sampled traversals, giving the optimised workload more than one second of measured training. These tabular benchmarks use five fresh-process repetitions after Numba warm-up and record median runtime, variation, traversals per second, and peak process-tree memory.
 
 Optimised MCCFR completed its fixed workload in `1.248` seconds, compared with `53.240` seconds for the reference implementation, a `42.7x` speedup. Separate 100,000-iteration profiles show that the reference solver spends most of its time in recursive Python traversal, sampling, and policy normalisation. The optimised traversal runs inside the compiled Numba kernel, whose internal operations are not visible to Python's profiler.
+
+Across three matched repetitions, optimised Deep CFR took a median `1.48` seconds versus `9.72` seconds for the reference implementation: `6.55x` faster with `15.4%` lower peak process-tree memory. Profiling reduced network calls from 30,315 to 365 and Python-visible calls from 19.3 million to 1.5 million. Single-process collection reached `7,997.6` traversals/second; the full final run averaged `519.4` once neural training and snapshot exports were included. These Leduc measurements are not a multi-process or modified-HULHE forecast.
 
 Detailed configurations, full-precision tables, plots, raw repetitions, memory results, and profiler output are available in:
 
@@ -81,7 +98,7 @@ Detailed configurations, full-precision tables, plots, raw repetitions, memory r
 
 ## Training and policy artefacts
 
-To produce a final policy, training runs to a fixed budget, exports average-policy snapshots, evaluates them exactly, places the selected snapshot under `artifacts/`, and records its compatibility data and checksum in the registry. `TabularAgent` then exposes the frozen policy without depending on the trainer.
+To produce a final policy, training runs to a fixed budget, exports average-policy snapshots, evaluates them, places the selected snapshot under `artifacts/`, and records its compatibility data and checksum in the registry. `TabularAgent` and `NeuralAgent` then expose frozen policies without depending on the trainer.
 
 Start a training run with an explicit budget and snapshot milestones:
 
@@ -106,15 +123,28 @@ python train.py --resume runs/leduc-cfr-plus-final/checkpoints/latest.npz
 
 A checkpoint contains the state needed to resume training. A smaller strategy snapshot contains only the normalised average policy and compatibility metadata needed for evaluation or play.
 
-The same checkpoint and snapshot formats support MCCFR. Its checkpoint also saves the chance and policy random-number generator states, so a resumed run continues with the same future samples.
+The same persistence infrastructure supports MCCFR. Its checkpoint also saves the chance and policy random-number generator states, so a resumed run continues with the same future samples.
 
-Snapshots use non-executable NumPy data loaded with `allow_pickle=False`. Before constructing a `TabularAgent`, the registry verifies a trusted project-relative path, file size, SHA-256 checksum, game, encoding, action space, schema, and game-tree digest.
+Deep CFR runs save their resolved TOML configuration. Checkpoints retain the networks, reservoirs, random-number-generator states, milestones, metrics, elapsed time, and architecture metadata needed for compatible resume. Smaller playable snapshots contain only the frozen average-strategy network and reconstruction metadata.
+
+Start or resume the final Leduc Deep CFR configuration with:
+
+```bash
+python train.py \
+    --config configs/deep_cfr/leduc_final.toml \
+    --run-id leduc-deep-cfr-final
+
+python train.py --resume runs/leduc-deep-cfr-final/checkpoints/latest.pt
+```
+
+Tabular snapshots use non-executable NumPy data loaded with `allow_pickle=False`. Deep CFR snapshots load only expected PyTorch weights, reconstruct a named architecture, disable gradients, mask illegal actions, and reject incompatible metadata or tensor shapes. Before constructing either agent, the registry verifies a trusted project-relative path, file size, SHA-256 checksum, game, encoding, action space, schema, and applicable tree or model compatibility identifiers.
 
 After the registered snapshot has been placed under its declared `artifacts/` path, evaluate it with:
 
 ```bash
 python evaluate.py leduc_cfr_plus_final
 python evaluate.py leduc_mccfr_final
+python evaluate.py leduc_deep_cfr_final
 ```
 
 Plot one run or compare several runs with:
@@ -188,4 +218,4 @@ Development uses a single `main` branch. Run the local checks before each direct
 
 Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
 
-Next: complete the multi-seed and moderate optimised Leduc Deep CFR validation.
+Next: scale the validated Deep CFR pipeline to modified HULHE and calibrate it on representative hardware before the long cloud run.
