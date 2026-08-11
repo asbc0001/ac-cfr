@@ -267,7 +267,7 @@ class DeepCFR(NaiveDeepCFR):
             advantages,
             iteration,
             seed_index,
-            epochs=self.config.advantage_training_epochs,
+            training_steps=self.config.advantage_training_steps,
             strategy_targets=False,
         )
         self._training_metrics.append(
@@ -296,7 +296,7 @@ class DeepCFR(NaiveDeepCFR):
             strategies,
             iteration,
             seed_index,
-            epochs=self.config.strategy_training_epochs,
+            training_steps=self.config.strategy_training_steps,
             strategy_targets=True,
         )
         self._training_metrics.append(
@@ -325,7 +325,7 @@ class DeepCFR(NaiveDeepCFR):
         iteration: int,
         seed_index: int,
         *,
-        epochs: int,
+        training_steps: int,
         strategy_targets: bool,
     ) -> _LossMetrics:
         """Apply the shared reference training semantics without sample conversion."""
@@ -336,7 +336,7 @@ class DeepCFR(NaiveDeepCFR):
             targets=torch.from_numpy(targets),
             sample_iterations=torch.from_numpy(sample_iterations.astype(np.float32)),
             current_iteration=iteration,
-            epochs=epochs,
+            training_steps=training_steps,
             batch_size=self.config.batch_size,
             learning_rate=self.config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),

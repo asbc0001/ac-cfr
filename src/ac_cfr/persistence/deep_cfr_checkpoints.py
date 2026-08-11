@@ -25,7 +25,7 @@ from ac_cfr.training.reservoirs import (
     StrategySample,
 )
 
-DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 1
+DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 2
 PROJECT_VERSION = version("ac-cfr")
 _SOLVER_ID = "naive_deep_cfr"
 _RNG_CONTRACT = "python_random_and_derived_torch_v1"

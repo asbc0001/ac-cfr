@@ -100,6 +100,9 @@ class _LossMetrics:
     validation_loss: float | None
 
 
+_LOSS_EVALUATION_BATCHES = 4
+
+
 class NaiveDeepCFR:
     """Faithful one-trajectory-at-a-time Deep CFR correctness reference."""
 
@@ -379,14 +382,14 @@ class NaiveDeepCFR:
         return tuple(float(value) for value in predictions)
 
     def _train_advantage_network(self, player: int, iteration: int) -> DeepCFRNetwork:
-        """Train a freshly initialised network over one player's full reservoir."""
+        """Train a fresh network from uniformly sampled reservoir minibatches."""
         seed_index = _network_seed_index(player, iteration)
         network = self._new_network(seed_index)
         losses = _train_network(
             network=network,
             samples=self._advantage_reservoirs[player].samples,
             current_iteration=iteration,
-            epochs=self._config.advantage_training_epochs,
+            training_steps=self._config.advantage_training_steps,
             batch_size=self._config.batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
@@ -416,7 +419,7 @@ class NaiveDeepCFR:
             network=network,
             samples=self._strategy_reservoir.samples,
             current_iteration=iteration,
-            epochs=self._config.strategy_training_epochs,
+            training_steps=self._config.strategy_training_steps,
             batch_size=self._config.batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
@@ -528,7 +531,7 @@ def _train_network(
     network: DeepCFRNetwork,
     samples: tuple[AdvantageSample, ...] | tuple[StrategySample, ...],
     current_iteration: int,
-    epochs: int,
+    training_steps: int,
     batch_size: int,
     learning_rate: float,
     data_seed: int,
@@ -537,7 +540,7 @@ def _train_network(
     validation_fraction: float,
     max_gradient_norm: float | None,
 ) -> _LossMetrics:
-    """Train one network with deterministic shuffled PyTorch minibatches."""
+    """Train one network with deterministic uniform reservoir minibatches."""
     if not samples:
         raise ValueError("cannot train a network from an empty reservoir")
     states = torch.tensor([sample.state for sample in samples], dtype=torch.float32)
@@ -557,7 +560,7 @@ def _train_network(
         targets=targets,
         sample_iterations=sample_iterations,
         current_iteration=current_iteration,
-        epochs=epochs,
+        training_steps=training_steps,
         batch_size=batch_size,
         learning_rate=learning_rate,
         data_seed=data_seed,
@@ -576,7 +579,7 @@ def _train_network_tensors(
     targets: Tensor,
     sample_iterations: Tensor,
     current_iteration: int,
-    epochs: int,
+    training_steps: int,
     batch_size: int,
     learning_rate: float,
     data_seed: int,
@@ -608,19 +611,21 @@ def _train_network_tensors(
             sample_iterations=sample_iterations,
             training_indices=training_indices,
             current_iteration=current_iteration,
-            epochs=epochs,
+            training_steps=training_steps,
             batch_size=batch_size,
             generator=generator,
             strategy_targets=strategy_targets,
             max_gradient_norm=max_gradient_norm,
         )
+    training_evaluation_indices = _bounded_evaluation_indices(training_indices, batch_size)
+    validation_evaluation_indices = _bounded_evaluation_indices(validation_indices, batch_size)
     training_loss = _evaluate_network_loss(
         network,
         states,
         targets,
         action_masks,
         sample_iterations,
-        training_indices,
+        training_evaluation_indices,
         current_iteration,
         strategy_targets=strategy_targets,
     )
@@ -631,7 +636,7 @@ def _train_network_tensors(
             targets,
             action_masks,
             sample_iterations,
-            validation_indices,
+            validation_evaluation_indices,
             current_iteration,
             strategy_targets=strategy_targets,
         )
@@ -656,38 +661,41 @@ def _fit_network(
     sample_iterations: Tensor,
     training_indices: Tensor,
     current_iteration: int,
-    epochs: int,
+    training_steps: int,
     batch_size: int,
     generator: torch.Generator,
     strategy_targets: bool,
     max_gradient_norm: float | None,
 ) -> None:
-    """Fit one network while its caller controls the PyTorch random stream."""
+    """Apply a fixed number of uniformly sampled minibatch updates."""
     _require_finite_parameters(network)
     network.train()
-    for _ in range(epochs):
-        order = training_indices[torch.randperm(len(training_indices), generator=generator)]
-        for start in range(0, len(training_indices), batch_size):
-            indices = order[start : start + batch_size]
-            optimiser.zero_grad(set_to_none=True)
-            loss = linear_cfr_loss(
-                network(states[indices]),
-                targets[indices],
-                action_masks[indices],
-                sample_iterations[indices],
-                current_iteration,
-                strategy_targets=strategy_targets,
+    for _ in range(training_steps):
+        positions = torch.randint(
+            len(training_indices),
+            (batch_size,),
+            generator=generator,
+        )
+        indices = training_indices[positions]
+        optimiser.zero_grad(set_to_none=True)
+        loss = linear_cfr_loss(
+            network(states[indices]),
+            targets[indices],
+            action_masks[indices],
+            sample_iterations[indices],
+            current_iteration,
+            strategy_targets=strategy_targets,
+        )
+        loss.backward()
+        _require_finite_gradients(network)
+        if max_gradient_norm is not None:
+            torch.nn.utils.clip_grad_norm_(
+                network.parameters(),
+                max_gradient_norm,
+                error_if_nonfinite=True,
             )
-            loss.backward()
-            _require_finite_gradients(network)
-            if max_gradient_norm is not None:
-                torch.nn.utils.clip_grad_norm_(
-                    network.parameters(),
-                    max_gradient_norm,
-                    error_if_nonfinite=True,
-                )
-            optimiser.step()
-            _require_finite_parameters(network)
+        optimiser.step()
+        _require_finite_parameters(network)
     network.eval()
 
 
@@ -702,6 +710,12 @@ def _split_training_indices(
         return indices, torch.empty(0, dtype=torch.int64)
     validation_count = min(sample_count - 1, max(1, int(sample_count * validation_fraction)))
     return indices[validation_count:], indices[:validation_count]
+
+
+def _bounded_evaluation_indices(indices: Tensor, batch_size: int) -> Tensor:
+    """Keep loss diagnostics representative without scanning a growing reservoir."""
+    limit = _LOSS_EVALUATION_BATCHES * batch_size
+    return indices[:limit]
 
 
 def _evaluate_network_loss(

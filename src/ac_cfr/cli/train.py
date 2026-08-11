@@ -52,8 +52,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.traversals_per_player,
                 arguments.advantage_reservoir_capacity,
                 arguments.strategy_reservoir_capacity,
-                arguments.advantage_training_epochs,
-                arguments.strategy_training_epochs,
+                arguments.advantage_training_steps,
+                arguments.strategy_training_steps,
                 arguments.batch_size,
                 arguments.learning_rate,
                 arguments.validation_fraction,
@@ -171,8 +171,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--traversals-per-player", type=int)
     parser.add_argument("--advantage-reservoir-capacity", type=int)
     parser.add_argument("--strategy-reservoir-capacity", type=int)
-    parser.add_argument("--advantage-training-epochs", type=int)
-    parser.add_argument("--strategy-training-epochs", type=int)
+    parser.add_argument(
+        "--advantage-training-steps",
+        type=int,
+        help="Minibatch updates for each freshly initialised advantage network.",
+    )
+    parser.add_argument(
+        "--strategy-training-steps",
+        type=int,
+        help="Minibatch updates for each exported average-strategy network.",
+    )
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--learning-rate", type=float)
     parser.add_argument("--validation-fraction", type=float)
@@ -243,8 +251,8 @@ def _deep_cfr_config(
         "traversals_per_player": 200,
         "advantage_reservoir_capacity": 100_000,
         "strategy_reservoir_capacity": 100_000,
-        "advantage_training_epochs": 10,
-        "strategy_training_epochs": 20,
+        "advantage_training_steps": 20,
+        "strategy_training_steps": 40,
         "batch_size": 512,
         "learning_rate": 1e-3,
         "validation_fraction": 0.1,
@@ -281,8 +289,8 @@ def _reject_deep_cfr_options(
         "traversals_per_player",
         "advantage_reservoir_capacity",
         "strategy_reservoir_capacity",
-        "advantage_training_epochs",
-        "strategy_training_epochs",
+        "advantage_training_steps",
+        "strategy_training_steps",
         "batch_size",
         "learning_rate",
         "validation_fraction",

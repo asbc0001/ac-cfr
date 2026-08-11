@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ac_cfr.benchmarking.cfr_gate import BENCHMARK_ID, run_cfr_gate
+from ac_cfr.benchmarking.deep_cfr_profiling import run_deep_cfr_profiling
 from ac_cfr.benchmarking.deep_cfr_reference_validation import (
     run_deep_cfr_reference_validation,
 )
@@ -26,6 +27,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "mccfr-validation",
             "mccfr-gate",
             "deep-cfr-reference",
+            "deep-cfr-profile",
         ),
     )
     parser.add_argument("--output", type=Path)
@@ -62,13 +64,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_directory = arguments.output or Path("results/mccfr")
             result_path = run_mccfr_gate(output_directory, progress_callback=print)
             result_label = "gate"
-        else:
+        elif arguments.suite == "deep-cfr-reference":
             output_directory = arguments.output or Path("results/deep_cfr")
             result_path = run_deep_cfr_reference_validation(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "validation"
+        else:
+            output_directory = arguments.output or Path("results/deep_cfr")
+            result_path = run_deep_cfr_profiling(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "profiling"
         print(f"{result_label}: {result_path}")
         return 0
 

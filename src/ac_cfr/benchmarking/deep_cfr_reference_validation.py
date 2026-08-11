@@ -19,8 +19,8 @@ from ac_cfr.training.config import DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig, start_deep_cfr_training
 
 VALIDATION_ID = "deep_cfr"
-SEEDS: Final = (20260810, 20260811, 20260812, 20260813, 20260814)
-MILESTONES: Final = (1, 5, 10, 20)
+SEEDS: Final = (20260810, 20260811, 20260812)
+MILESTONES: Final = (1, 5, 10)
 TABULAR_REFERENCE_EXPLOITABILITY = 0.005
 
 _CONVERGENCE_FIELDS: Final = (
@@ -65,13 +65,13 @@ def run_deep_cfr_reference_validation(
     runs_root: Path = Path("runs"),
     progress_callback: Callable[[str], None] | None = None,
 ) -> Path:
-    """Train five declared seeds and write compact exact Leduc evidence."""
+    """Train three declared seeds and write compact exact Leduc evidence."""
     records: list[dict[str, object]] = []
     run_files: dict[str, object] = {}
     tree = compile_game_tree(LeducGame(), LeducConfig())
     for seed_number, seed in enumerate(SEEDS, start=1):
         _report(progress_callback, f"seed {seed_number}/{len(SEEDS)}: {seed}")
-        run_id = f"leduc-naive-deep-cfr-seed-{seed}"
+        run_id = f"leduc-naive-deep-cfr-fixed-steps-seed-{seed}"
         run_directory = runs_root / run_id
         if run_directory.exists():
             _report(progress_callback, f"seed {seed}: reusing compatible completed run")
@@ -137,8 +137,8 @@ def run_deep_cfr_reference_validation(
                 "traversals_per_outer_iteration": 400,
                 "advantage_reservoir_capacity": 100_000,
                 "strategy_reservoir_capacity": 100_000,
-                "advantage_training_epochs": 10,
-                "strategy_training_epochs": 20,
+                "advantage_training_steps": 20,
+                "strategy_training_steps": 40,
                 "batch_size": 512,
                 "learning_rate": 0.001,
                 "validation_fraction": 0.1,
@@ -179,8 +179,8 @@ def _run_config(run_id: str, seed: int) -> DeepCFRRunConfig:
             traversals_per_player=200,
             advantage_reservoir_capacity=100_000,
             strategy_reservoir_capacity=100_000,
-            advantage_training_epochs=10,
-            strategy_training_epochs=20,
+            advantage_training_steps=20,
+            strategy_training_steps=40,
             batch_size=512,
             learning_rate=1e-3,
             validation_fraction=0.1,

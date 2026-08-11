@@ -1,13 +1,18 @@
+from collections.abc import Callable
 from random import Random
 
 import numpy as np
 import pytest
 import torch
 
+from ac_cfr.common.config import ModelConfigId
 from ac_cfr.games.leduc import LeducConfig, LeducGame
+from ac_cfr.games.leduc_neural import LEDUC_NEURAL_STATE_SIZE
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
+from ac_cfr.models import build_deep_cfr_network
 from ac_cfr.solvers.naive_deep_cfr import (
     NaiveDeepCFR,
+    _train_network_tensors,
     deep_cfr_regret_matching,
     linear_cfr_loss,
 )
@@ -84,8 +89,8 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
         traversals_per_player=1,
         advantage_reservoir_capacity=100,
         strategy_reservoir_capacity=100,
-        advantage_training_epochs=1,
-        strategy_training_epochs=1,
+        advantage_training_steps=1,
+        strategy_training_steps=1,
         batch_size=128,
         learning_rate=1e-3,
         validation_fraction=0.1,
@@ -157,3 +162,40 @@ def test_linear_cfr_loss_rejects_non_finite_network_output() -> None:
             current_iteration=1,
             strategy_targets=False,
         )
+
+
+def test_network_training_uses_the_exact_fixed_update_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    training_steps = 7
+    completed_steps = 0
+    original_step = torch.optim.Adam.step
+
+    def count_step(
+        optimiser: torch.optim.Adam,
+        closure: Callable[[], float] | None = None,
+    ) -> float | None:
+        nonlocal completed_steps
+        completed_steps += 1
+        return original_step(optimiser, closure)
+
+    monkeypatch.setattr(torch.optim.Adam, "step", count_step)
+    sample_count = 10
+    _train_network_tensors(
+        network=build_deep_cfr_network(ModelConfigId.LEDUC_DEEP_CFR),
+        states=torch.zeros((sample_count, LEDUC_NEURAL_STATE_SIZE)),
+        action_masks=torch.tensor(((True, True, False),) * sample_count),
+        targets=torch.zeros((sample_count, 3)),
+        sample_iterations=torch.ones(sample_count),
+        current_iteration=1,
+        training_steps=training_steps,
+        batch_size=4,
+        learning_rate=1e-3,
+        data_seed=10,
+        training_seed=11,
+        strategy_targets=False,
+        validation_fraction=0.2,
+        max_gradient_norm=10.0,
+    )
+
+    assert completed_steps == training_steps

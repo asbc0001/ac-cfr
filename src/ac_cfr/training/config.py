@@ -15,8 +15,8 @@ class DeepCFRTrainingConfig:
     traversals_per_player: int
     advantage_reservoir_capacity: int
     strategy_reservoir_capacity: int
-    advantage_training_epochs: int
-    strategy_training_epochs: int
+    advantage_training_steps: int
+    strategy_training_steps: int
     batch_size: int
     learning_rate: float
     validation_fraction: float
@@ -34,8 +34,8 @@ class DeepCFRTrainingConfig:
             "traversals_per_player",
             "advantage_reservoir_capacity",
             "strategy_reservoir_capacity",
-            "advantage_training_epochs",
-            "strategy_training_epochs",
+            "advantage_training_steps",
+            "strategy_training_steps",
             "batch_size",
         ):
             _validate_positive_integer(name, getattr(self, name))
@@ -89,8 +89,8 @@ class DeepCFRTrainingConfig:
             "traversals_per_player",
             "advantage_reservoir_capacity",
             "strategy_reservoir_capacity",
-            "advantage_training_epochs",
-            "strategy_training_epochs",
+            "advantage_training_steps",
+            "strategy_training_steps",
             "batch_size",
             "learning_rate",
             "validation_fraction",
