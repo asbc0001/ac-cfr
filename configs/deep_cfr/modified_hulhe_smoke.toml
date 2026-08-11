@@ -1,0 +1,31 @@
+format_version = 2
+
+# Tiny local lifecycle check only; this preset is not suitable for strategy training.
+[run]
+implementation = "optimised"
+checkpoint_interval = 1
+
+[training]
+iterations = 2
+traversals_per_player = 100
+advantage_reservoir_capacity = 10000
+strategy_reservoir_capacity = 10000
+advantage_training_steps = 100
+strategy_training_steps = 100
+advantage_batch_size = 512
+strategy_batch_size = 512
+learning_rate = 0.001
+validation_fraction = 0.1
+max_gradient_norm = 1.0
+dropout_probability = 0.0
+seed = 20260811
+snapshot_iterations = [1]
+game_configuration_id = "modified_hulhe"
+model_config_id = "modified_hulhe_deep_cfr"
+state_encoding_id = "holdem"
+optimizer_id = "adam"
+
+[runtime]
+inference_batch_size = 256
+cpu_threads = 1
+device = "cpu"
