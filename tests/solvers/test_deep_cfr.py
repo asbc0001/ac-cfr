@@ -75,6 +75,7 @@ def test_optimised_deep_cfr_uses_packed_memory_and_exports_a_legal_policy() -> N
     solver = _ObservedDeepCFR(tree, config)
 
     solver.train(1)
+    phase_times = solver.recent_training_times
 
     assert solver.iteration == 1
     assert max(solver.inference_batch_sizes) == config.traversals_per_player
@@ -93,3 +94,6 @@ def test_optimised_deep_cfr_uses_packed_memory_and_exports_a_legal_policy() -> N
         for sample in solver.strategy_reservoir.samples
     )
     assert len(solver.training_metrics) == 3
+    assert phase_times.traversal_seconds > 0.0
+    assert phase_times.advantage_training_seconds > 0.0
+    assert phase_times.strategy_training_seconds > 0.0

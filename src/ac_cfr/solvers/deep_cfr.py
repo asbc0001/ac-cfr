@@ -96,8 +96,8 @@ class DeepCFR(NaiveDeepCFR):
             "strategy_reservoir": self._packed_strategy_reservoir.training_state()["rng_state"],
         }
 
-    def _run_player_update(self, player: int, iteration: int) -> None:
-        """Advance K independent traversals together, then replace one network."""
+    def _collect_player_traversals(self, player: int, iteration: int) -> None:
+        """Advance K independent sampled traversals in inference batches."""
         for start in range(0, self.config.traversals_per_player, self.config.batch_size):
             stop = min(start + self.config.batch_size, self.config.traversals_per_player)
             traversals = [
@@ -111,7 +111,6 @@ class DeepCFR(NaiveDeepCFR):
                 for traversal_index in range(start, stop)
             ]
             self._resolve_traversals(traversals)
-        self._advantage_networks[player] = self._train_advantage_network(player, iteration)
 
     def _resolve_traversals(self, traversals: list[_Traversal]) -> None:
         """Resume all active traversals one batched inference boundary at a time."""

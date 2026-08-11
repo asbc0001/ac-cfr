@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from math import fsum, isfinite
 from random import Random
+from time import perf_counter
 
 import numpy as np
 import torch
@@ -100,6 +101,15 @@ class _LossMetrics:
     validation_loss: float | None
 
 
+@dataclass(frozen=True, slots=True)
+class DeepCFRTrainingTimes:
+    """Coarse timings for the most recent call to ``train``."""
+
+    traversal_seconds: float
+    advantage_training_seconds: float
+    strategy_training_seconds: float
+
+
 _LOSS_EVALUATION_BATCHES = 4
 
 
@@ -140,6 +150,9 @@ class NaiveDeepCFR:
         self._final_strategy_network: DeepCFRNetwork | None = None
         self._training_metrics: list[NetworkTrainingMetrics] = []
         self._iteration = 0
+        self._traversal_seconds = 0.0
+        self._advantage_training_seconds = 0.0
+        self._strategy_training_seconds = 0.0
 
     @property
     def iteration(self) -> int:
@@ -190,6 +203,15 @@ class NaiveDeepCFR:
     def training_metrics(self) -> tuple[NetworkTrainingMetrics, ...]:
         """Return completed advantage and strategy network training measurements."""
         return tuple(self._training_metrics)
+
+    @property
+    def recent_training_times(self) -> DeepCFRTrainingTimes:
+        """Return phase timings for the most recent call to ``train``."""
+        return DeepCFRTrainingTimes(
+            traversal_seconds=self._traversal_seconds,
+            advantage_training_seconds=self._advantage_training_seconds,
+            strategy_training_seconds=self._strategy_training_seconds,
+        )
 
     def training_rng_state(self) -> dict[str, object]:
         """Return every mutable random stream used by traversal and reservoirs."""
@@ -245,6 +267,9 @@ class NaiveDeepCFR:
         _validate_non_negative_integer("iterations", iterations)
         if self._iteration + iterations > self._config.iterations:
             raise ValueError("training would exceed the configured iteration budget")
+        self._traversal_seconds = 0.0
+        self._advantage_training_seconds = 0.0
+        self._strategy_training_seconds = 0.0
 
         for _ in range(iterations):
             current_iteration = self._iteration + 1
@@ -256,12 +281,12 @@ class NaiveDeepCFR:
                 current_iteration in self._config.snapshot_iterations
                 and current_iteration < self._config.iterations
             ):
-                self._snapshot_networks[current_iteration] = self._train_strategy_network(
+                self._snapshot_networks[current_iteration] = self._timed_strategy_network(
                     current_iteration
                 )
 
         if self._iteration == self._config.iterations and self._final_strategy_network is None:
-            self._final_strategy_network = self._train_strategy_network(self._iteration)
+            self._final_strategy_network = self._timed_strategy_network(self._iteration)
 
     def strategy_for_information_set(
         self,
@@ -282,6 +307,15 @@ class NaiveDeepCFR:
 
     def _run_player_update(self, player: int, iteration: int) -> None:
         """Collect K traversals, then replace and train one advantage network."""
+        started = perf_counter()
+        self._collect_player_traversals(player, iteration)
+        self._traversal_seconds += perf_counter() - started
+        started = perf_counter()
+        self._advantage_networks[player] = self._train_advantage_network(player, iteration)
+        self._advantage_training_seconds += perf_counter() - started
+
+    def _collect_player_traversals(self, player: int, iteration: int) -> None:
+        """Collect one reference batch of independent sampled traversals."""
         for _ in range(self._config.traversals_per_player):
             self._traverse(
                 node_id=0,
@@ -289,7 +323,13 @@ class NaiveDeepCFR:
                 iteration=iteration,
                 sampled_opponent_actions={},
             )
-        self._advantage_networks[player] = self._train_advantage_network(player, iteration)
+
+    def _timed_strategy_network(self, iteration: int) -> DeepCFRNetwork:
+        """Train one strategy network and include it in the recent phase timing."""
+        started = perf_counter()
+        network = self._train_strategy_network(iteration)
+        self._strategy_training_seconds += perf_counter() - started
+        return network
 
     def _traverse(
         self,

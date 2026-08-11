@@ -9,7 +9,6 @@ from statistics import median
 from typing import Final
 
 from ac_cfr.evaluation.metrics import evaluate_strategy
-from ac_cfr.evaluation.plotting import plot_deep_cfr_reference_convergence
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
 from ac_cfr.persistence.deep_cfr_checkpoints import load_deep_cfr_checkpoint
@@ -107,15 +106,8 @@ def run_deep_cfr_reference_validation(
     output_directory.mkdir(parents=True, exist_ok=True)
     convergence_path = output_directory / "convergence.csv"
     summary_path = output_directory / "summary.csv"
-    plot_path = output_directory / "plots" / "reference_convergence.png"
     _write_csv(convergence_path, _CONVERGENCE_FIELDS, records)
     _write_csv(summary_path, _SUMMARY_FIELDS, summary)
-    plot_deep_cfr_reference_convergence(
-        convergence_path,
-        summary_path,
-        plot_path,
-        tabular_reference_exploitability=TABULAR_REFERENCE_EXPLOITABILITY,
-    )
     passed = all(bool(check["passed"]) for check in checks)
     validation_path = output_directory / "validation.json"
     _write_json(
@@ -155,12 +147,10 @@ def run_deep_cfr_reference_validation(
             "files": {
                 "convergence": convergence_path.name,
                 "summary": summary_path.name,
-                "plot": str(plot_path.relative_to(output_directory)),
             },
             "file_descriptions": {
                 "convergence": "Exact measurements for every seed and milestone snapshot.",
                 "summary": "Median and complete seed range at each milestone.",
-                "plot": "Per-seed and median exact exploitability by iterations and time.",
             },
         },
     )

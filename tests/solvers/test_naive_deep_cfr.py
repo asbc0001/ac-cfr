@@ -108,6 +108,7 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
     solver.train(1)
     first_player_zero_network = solver.advantage_networks[0]
     solver.train(1)
+    phase_times = solver.recent_training_times
 
     assert solver.update_observations == [
         (0, False, False),
@@ -150,6 +151,9 @@ def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:
         for metric in solver.training_metrics
     )
     assert any(metric.validation_samples > 0 for metric in solver.training_metrics)
+    assert phase_times.traversal_seconds > 0.0
+    assert phase_times.advantage_training_seconds > 0.0
+    assert phase_times.strategy_training_seconds > 0.0
 
 
 def test_linear_cfr_loss_rejects_non_finite_network_output() -> None:

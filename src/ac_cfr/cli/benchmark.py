@@ -7,6 +7,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ac_cfr.benchmarking.cfr_gate import BENCHMARK_ID, run_cfr_gate
+from ac_cfr.benchmarking.deep_cfr_benchmark import (
+    run_deep_cfr_benchmark,
+    run_deep_cfr_convergence_comparison,
+)
 from ac_cfr.benchmarking.deep_cfr_profiling import run_deep_cfr_profiling
 from ac_cfr.benchmarking.deep_cfr_reference_validation import (
     run_deep_cfr_reference_validation,
@@ -28,6 +32,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "mccfr-gate",
             "deep-cfr-reference",
             "deep-cfr-profile",
+            "deep-cfr-benchmark",
+            "deep-cfr-comparison",
         ),
     )
     parser.add_argument("--output", type=Path)
@@ -71,13 +77,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 progress_callback=print,
             )
             result_label = "validation"
-        else:
+        elif arguments.suite == "deep-cfr-profile":
             output_directory = arguments.output or Path("results/deep_cfr")
             result_path = run_deep_cfr_profiling(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "profiling"
+        elif arguments.suite == "deep-cfr-benchmark":
+            output_directory = arguments.output or Path("results/deep_cfr")
+            result_path = run_deep_cfr_benchmark(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "benchmark"
+        else:
+            output_directory = arguments.output or Path("results/deep_cfr")
+            result_path = run_deep_cfr_convergence_comparison(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "comparison"
         print(f"{result_label}: {result_path}")
         return 0
 

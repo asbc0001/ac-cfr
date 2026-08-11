@@ -220,77 +220,59 @@ def plot_cfr_gate_results(
     return (*plot_paths, performance_path)
 
 
-def plot_deep_cfr_reference_convergence(
+def plot_deep_cfr_implementation_convergence(
     convergence_path: Path,
-    summary_path: Path,
     output_path: Path,
-    *,
-    tabular_reference_exploitability: float,
 ) -> None:
-    """Plot reference Deep CFR quality by outer iterations and training time."""
-    convergence = _read_records(
+    """Compare matched reference and optimised Deep CFR learning trajectories."""
+    records = _read_records(
         convergence_path,
-        {"seed", "iteration", "elapsed_training_seconds", "exploitability"},
+        {
+            "implementation",
+            "iteration",
+            "elapsed_training_seconds",
+            "exploitability",
+        },
     )
-    summary = _read_records(
-        summary_path,
-        {"iteration", "median_elapsed_training_seconds", "median_exploitability"},
-    )
+    implementations = {record["implementation"] for record in records}
+    if implementations != {"reference", "optimised"}:
+        raise ValueError("Deep CFR convergence requires reference and optimised records")
 
     from matplotlib.figure import Figure
 
     figure = Figure(figsize=(12, 4.8))
     iteration_axis, time_axis = figure.subplots(1, 2)
-    for seed in sorted({record["seed"] for record in convergence}, key=int):
-        records = sorted(
-            (record for record in convergence if record["seed"] == seed),
+    for implementation, label, colour in (
+        ("reference", "Reference", "tab:orange"),
+        ("optimised", "Optimised", "tab:blue"),
+    ):
+        series = sorted(
+            (record for record in records if record["implementation"] == implementation),
             key=lambda record: int(record["iteration"]),
         )
-        values = [float(record["exploitability"]) for record in records]
+        values = [float(record["exploitability"]) for record in series]
         iteration_axis.plot(
-            [int(record["iteration"]) for record in records],
+            [int(record["iteration"]) for record in series],
             values,
-            color="tab:blue",
-            alpha=0.25,
+            marker="o",
+            color=colour,
+            label=label,
         )
         time_axis.plot(
-            [float(record["elapsed_training_seconds"]) for record in records],
+            [float(record["elapsed_training_seconds"]) for record in series],
             values,
-            color="tab:blue",
-            alpha=0.25,
+            marker="o",
+            color=colour,
+            label=label,
         )
-    summary.sort(key=lambda record: int(record["iteration"]))
-    median_values = [float(record["median_exploitability"]) for record in summary]
-    iteration_axis.plot(
-        [int(record["iteration"]) for record in summary],
-        median_values,
-        color="tab:blue",
-        marker="o",
-        linewidth=2,
-        label="Median across seeds",
-    )
-    time_axis.plot(
-        [float(record["median_elapsed_training_seconds"]) for record in summary],
-        median_values,
-        color="tab:blue",
-        marker="o",
-        linewidth=2,
-        label="Median across seeds",
-    )
+    iteration_axis.set_xlabel("Deep CFR outer iterations")
+    time_axis.set_xlabel("Training time (seconds)")
     for axis in (iteration_axis, time_axis):
-        axis.axhline(
-            tabular_reference_exploitability,
-            color="tab:orange",
-            linestyle="--",
-            label="Validated tabular ceiling",
-        )
-        axis.set_yscale("log")
         axis.set_ylabel("Exact exploitability (chips)")
+        axis.set_yscale("log")
         axis.grid(alpha=0.25)
         axis.legend()
-    iteration_axis.set_xlabel("Deep CFR outer iterations")
-    time_axis.set_xlabel("Training time per seed (seconds)")
-    figure.suptitle("Reference Deep CFR convergence on Leduc")
+    figure.suptitle("Matched Deep CFR convergence on Leduc")
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
     _save_figure(figure, output_path)
 
@@ -474,6 +456,118 @@ def plot_mccfr_performance(summary_path: Path, output_path: Path) -> None:
         f"{iteration_count:,} iterations; {traversal_count:,} sampled traversals"
     )
     figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.88))
+    _save_figure(figure, output_path)
+
+
+def plot_deep_cfr_performance(summary_path: Path, output_path: Path) -> None:
+    """Plot Deep CFR total time, phase costs, traversal throughput, and memory."""
+    records = _read_records(
+        summary_path,
+        {
+            "implementation",
+            "traversals",
+            "optimizer_steps",
+            "median_seconds",
+            "median_absolute_deviation_seconds",
+            "median_traversal_seconds",
+            "median_advantage_training_seconds",
+            "median_strategy_training_seconds",
+            "median_other_seconds",
+            "collection_traversals_per_second",
+            "median_absolute_deviation_collection_traversals_per_second",
+            "memory_metric",
+            "median_peak_memory_mb",
+            "median_absolute_deviation_memory_mb",
+        },
+    )
+    by_implementation = {record["implementation"]: record for record in records}
+    if set(by_implementation) != {"reference", "optimised"}:
+        raise ValueError("Deep CFR performance requires reference and optimised records")
+    traversal_counts = {int(record["traversals"]) for record in records}
+    optimizer_steps = {int(record["optimizer_steps"]) for record in records}
+    memory_metrics = {record["memory_metric"] for record in records}
+    if len(traversal_counts) != 1 or len(optimizer_steps) != 1 or len(memory_metrics) != 1:
+        raise ValueError("Deep CFR performance records use inconsistent workloads")
+
+    from matplotlib.figure import Figure
+
+    implementations = ("reference", "optimised")
+    labels = ("Reference", "Optimised")
+    colours = ("tab:orange", "tab:blue")
+    figure = Figure(figsize=(13, 8))
+    axes = figure.subplots(2, 2)
+    runtime_axis, phase_axis, throughput_axis, memory_axis = axes.flat
+
+    runtimes = [float(by_implementation[name]["median_seconds"]) for name in implementations]
+    runtime_errors = [
+        float(by_implementation[name]["median_absolute_deviation_seconds"])
+        for name in implementations
+    ]
+    runtime_bars = runtime_axis.bar(labels, runtimes, yerr=runtime_errors, color=colours, capsize=4)
+    speedup = runtimes[0] / runtimes[1]
+    runtime_axis.bar_label(
+        runtime_bars,
+        labels=(f"{runtimes[0]:.2f}", f"{runtimes[1]:.2f}\n{speedup:.2f}× faster"),
+        padding=3,
+    )
+    runtime_axis.set_ylabel("Complete training time (seconds)")
+
+    phase_fields = (
+        ("median_traversal_seconds", "Traversal collection", "tab:blue"),
+        ("median_advantage_training_seconds", "Advantage training", "tab:orange"),
+        ("median_strategy_training_seconds", "Strategy training", "tab:green"),
+        ("median_other_seconds", "Other", "tab:gray"),
+    )
+    bottoms = [0.0, 0.0]
+    for field, label, colour in phase_fields:
+        values = [float(by_implementation[name][field]) for name in implementations]
+        phase_axis.bar(labels, values, bottom=bottoms, label=label, color=colour)
+        bottoms = [bottom + value for bottom, value in zip(bottoms, values, strict=True)]
+    phase_axis.set_ylabel("Median time (seconds)")
+    phase_axis.legend(fontsize=8)
+
+    throughput = [
+        float(by_implementation[name]["collection_traversals_per_second"])
+        for name in implementations
+    ]
+    throughput_errors = [
+        float(by_implementation[name]["median_absolute_deviation_collection_traversals_per_second"])
+        for name in implementations
+    ]
+    throughput_bars = throughput_axis.bar(
+        labels,
+        throughput,
+        yerr=throughput_errors,
+        color=colours,
+        capsize=4,
+    )
+    throughput_axis.bar_label(
+        throughput_bars,
+        labels=tuple(f"{value:,.0f}" for value in throughput),
+        padding=3,
+    )
+    throughput_axis.set_ylabel("Traversal collection / second")
+
+    memory = [float(by_implementation[name]["median_peak_memory_mb"]) for name in implementations]
+    memory_errors = [
+        float(by_implementation[name]["median_absolute_deviation_memory_mb"])
+        for name in implementations
+    ]
+    memory_bars = memory_axis.bar(labels, memory, yerr=memory_errors, color=colours, capsize=4)
+    memory_axis.bar_label(
+        memory_bars,
+        labels=tuple(f"{value:.1f}" for value in memory),
+        padding=3,
+    )
+    memory_axis.set_ylabel(f"Peak process-tree {memory_metrics.pop().upper()} (MB)")
+
+    for axis in (runtime_axis, phase_axis, throughput_axis, memory_axis):
+        axis.grid(axis="y", alpha=0.25)
+    figure.suptitle(
+        "Reference versus optimised Deep CFR on Leduc\n"
+        f"{traversal_counts.pop():,} traversals; {optimizer_steps.pop():,} optimizer steps"
+    )
+    figure.tight_layout(rect=(0.0, 0.0, 1.0, 0.94))
     _save_figure(figure, output_path)
 
 
