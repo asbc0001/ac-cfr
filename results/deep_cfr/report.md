@@ -1,73 +1,91 @@
-# Reference Deep CFR validation on Leduc
+# Deep CFR on Leduc
 
-**Status: PASS**
+- **Reference learning validation:** PASS
+- **Implementation profiling:** COMPLETE
 
 ## Scope
 
-This validation checks that the deliberately slow reference Deep CFR implementation learns in
-the correct direction across multiple random seeds. It also exercises periodic average-strategy
-snapshots, exact Leduc evaluation, checkpointing, compact metrics and held-out neural losses.
+This evidence checks that the reference Deep CFR implementation learns in the correct direction
+across several seeds and identifies the main costs in the reference and optimised implementations.
+It is not the final Leduc policy or the formal performance comparison.
 
-This is a correctness reference before optimisation. It is not the final Leduc Deep CFR policy
-and does not claim near-equilibrium quality.
+Deep CFR now uses fixed optimizer-step budgets. Each training step draws one minibatch uniformly,
+with replacement, from the training portion of the relevant uniform reservoir. This follows the
+intended reservoir distribution while preventing later outer iterations from becoming more
+expensive merely because more samples have been collected.
 
-## Workload
+## Reference learning validation
 
-Five seeds, `20260810` to `20260814`, each ran for 20 outer iterations. Every outer iteration
-performed 200 external-sampling traversals for each player, or 400 traversals in total. Each seed
-therefore completed 8,000 traversals.
+Three seeds, `20260810` to `20260812`, each ran for 10 outer iterations. Every iteration performed
+200 external-sampling traversals per player, giving 4,000 traversals per seed. Each freshly
+initialised advantage network received 20 minibatch updates. Average-strategy networks exported
+at iterations 1, 5 and 10 received 40 updates each, giving 520 optimizer steps per seed.
 
-The networks used three 64-unit hidden layers, Adam with a `0.001` learning rate, batches of 512,
-10 advantage-training epochs and 20 average-strategy-training epochs. Reservoir capacities were
-100,000 samples, 10% of each training set was held out for validation, gradient norms were capped
-at 10, and dropout remained disabled. Early stopping was disabled.
+The networks used three 64-unit hidden layers, Adam with a `0.001` learning rate and batches of
+512. Reservoir capacities were 100,000 samples, 10% of each current reservoir was held out for
+validation, gradient norms were capped at 10, and dropout remained disabled.
 
-The workload was selected after small calibration runs. It gives the reference implementation
-roughly two minutes of median training work per seed and four separated evaluation points without
-turning the intentionally inefficient implementation into a production-scale run. The later
-optimised implementation will use larger workloads and determine final Leduc strategy quality.
-
-Recorded training time includes the configured milestone average-strategy-network training
-inside `solver.train()`. Exact evaluation, checkpoint writes, snapshot writes and plotting are
-outside that time.
-
-## Results
-
-Every seed finished with lower exact exploitability than at its first snapshot. The median also
-decreased at every declared milestone.
+All three seeds ended with lower exact exploitability than at their first snapshot, and the median
+decreased at every predeclared milestone.
 
 | Outer iterations | Traversals per seed | Median exploitability | Seed range | Median training time |
 |---:|---:|---:|---:|---:|
-| 1 | 400 | 2.7574 | 1.7466 to 3.9952 | 1.58 s |
-| 5 | 2,000 | 1.9510 | 1.6981 to 1.9987 | 16.56 s |
-| 10 | 4,000 | 1.0357 | 1.0067 to 1.1769 | 44.41 s |
-| 20 | 8,000 | 0.8199 | 0.6679 to 0.9299 | 124.87 s |
+| 1 | 400 | 3.4792 | 1.8533 to 3.8519 | 10.81 s |
+| 5 | 2,000 | 1.9776 | 1.9596 to 2.0180 | 37.00 s |
+| 10 | 4,000 | 1.7601 | 1.5746 to 2.0512 | 65.91 s |
 
-The final median remains far above the validated tabular CFR/CFR+ ceiling of `0.005` chips per
-hand. That gap is shown deliberately: this short reference run establishes consistent learning,
-while optimisation and subsequent larger multi-seed validation are still required.
+The final median remains well above the validated tabular exploitability ceiling of `0.005` chips
+per hand. That is expected for this bounded reference check. A later moderate optimised-only run
+will assess practical Leduc strategy quality.
 
-Training and held-out average-strategy losses remained similar at later milestones. This provides
-no obvious conventional overfitting warning, but loss is only a diagnostic. Exact exploitability
-is the strategy-quality measurement.
+Training and held-out losses use separate samples and remain broadly comparable. They can reveal
+ordinary overfitting, but exact exploitability is the strategy-quality measurement.
 
-## Checkpoint and snapshot flow
+## Checkpoints and snapshots
 
 Each run saved iteration-labelled checkpoints and a `latest.pt` alias. A checkpoint contains the
-networks, reservoirs, deterministic RNG states, configuration, elapsed training time and compact
-metric records needed for exact continuation.
+networks, reservoirs, deterministic random-number-generator states, configuration, elapsed
+training time and compact metrics needed to continue from a completed outer iteration.
 
-At iterations 1, 5, 10 and 20, training froze a separate average-strategy network. Those snapshots
-contain only inference requirements, are loaded with PyTorch's restricted weights-only loader,
-and were converted into complete Leduc policies for independent exact evaluation. Advantage
-networks and reservoirs are training state and are not exposed as playable policies.
+At iterations 1, 5 and 10, training froze a separate average-strategy network. Each snapshot was
+loaded independently and converted into a complete Leduc policy for exact evaluation. Advantage
+networks and reservoirs remain training state and are not playable policies.
+
+## Implementation profiling
+
+Both solvers were warmed before profiling. The `cProfile` workload used the same seed, network,
+batch size, three outer iterations, 3,000 traversals and 220 optimizer steps for each
+implementation. It took 31.72 profiled seconds for the reference solver and 30.13 for the
+optimised solver. These instrumented times identify bottlenecks and are not formal speed results.
+
+The separate PyTorch operator workload used 500 traversals and 60 optimizer steps. It was large
+enough to include repeated inference, forward passes, backpropagation and Adam updates while
+remaining short. Tensor-shape and memory tracing were disabled because their extra overhead was
+not needed for this question.
+
+The profiles show:
+
+- fixed neural training dominates both implementations, with backpropagation, matrix operations
+  and Adam updates accounting for most CPU time;
+- batched inference reduces network forward calls from 30,315 to 365;
+- packed storage and batching reduce Python-visible calls from 19.3 million to 1.5 million; and
+- optimised traversal occupies about 0.6 cumulative profiled seconds, compared with about 6.3
+  seconds for recursive reference traversal.
+
+The optimised traversal path is materially leaner, but the identical neural-training workload now
+dominates end-to-end time. Multiprocessing is therefore not justified for this small Leduc CPU
+workload. Formal repeated timing, throughput and memory measurement remains separate from these
+diagnostic profiles.
 
 ## Files
 
-- `convergence.csv`: full-precision measurements for every seed and snapshot milestone.
+- `convergence.csv`: full-precision exact measurements for every seed and milestone.
 - `summary.csv`: medians and complete seed ranges at each milestone.
-- `validation.json`: exact configuration, pass checks and links to run-local artefacts.
+- `validation.json`: configuration, checks and links to run-local checkpoints and snapshots.
 - `plots/reference_convergence.png`: per-seed and median exploitability by iterations and time.
+- `profiling.json`: exact profile workloads, environment and profile file index.
+- `profiles/*_cprofile.md`: Python and native-call CPU paths ranked by cumulative time.
+- `profiles/*_torch_profiler.md`: PyTorch operations ranked by self CPU time.
 
-The large checkpoints and neural snapshots remain under ignored `runs/` directories rather than
-normal Git history. The compact validation evidence in this directory is version-controlled.
+Large checkpoints and neural snapshots remain under ignored `runs/` directories. The compact
+validation and profiling evidence in this directory is suitable for version control.

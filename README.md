@@ -1,6 +1,6 @@
 # AC CFR
 
-A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It currently includes complete reference and optimised CFR, CFR+, and external-sampling MCCFR pipelines, plus the shared Hold'em foundations needed for Deep CFR.
+A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It currently includes complete reference and optimised CFR, CFR+, and external-sampling MCCFR pipelines, plus reference and optimised Deep CFR implementations for Leduc and the shared Hold'em foundations.
 
 ## Current functionality
 
@@ -169,8 +169,8 @@ src/ac_cfr/
 ├── evaluation/      Exact best responses, metrics, self-play, and plotting
 ├── games/           Kuhn, Leduc, Hold'em, and shared indexed-tree contracts
 ├── persistence/     Checkpoints, snapshots, registry, and compact results
-├── solvers/         Reference and optimised CFR, CFR+, and MCCFR
-└── training/        Reproducible training schedules and metric recording
+├── solvers/         Reference and optimised CFR, CFR+, MCCFR, and Deep CFR
+└── training/        Reproducible tabular and neural training schedules
 ```
 
 Game states hold complete hand data, while playable agents act through player-visible `InformationState` values. Solver strategies are also indexed by information set, preventing decisions from using hidden opponent cards. Kuhn and Leduc use precomputed trees; Hold'em uses compact on-demand transitions rather than pre-enumerating its full tree.
@@ -187,4 +187,4 @@ Development uses a single `main` branch. Run the local checks before each direct
 
 Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
 
-Next: implement and validate Deep CFR on Leduc using the same game, evaluation, snapshot, and benchmarking foundations.
+Next: complete the fixed-workload Deep CFR benchmark and moderate optimised Leduc validation.

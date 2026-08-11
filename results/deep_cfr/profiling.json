@@ -1,0 +1,119 @@
+{
+  "about": "Machine-readable configuration, environment, and file index for separate Leduc Deep CFR diagnostic profiles. These runs are not formal timings.",
+  "configuration": {
+    "cprofile_workload": {
+      "advantage_reservoir_capacity": 100000,
+      "advantage_training_steps": 30,
+      "batch_size": 512,
+      "dropout_probability": 0.0,
+      "iterations": 3,
+      "learning_rate": 0.001,
+      "max_gradient_norm": 10.0,
+      "model_config_id": "leduc_deep_cfr",
+      "optimizer_id": "adam",
+      "seed": 20260811,
+      "snapshot_iterations": [],
+      "state_encoding_id": "leduc_neural",
+      "strategy_reservoir_capacity": 100000,
+      "strategy_training_steps": 40,
+      "total_advantage_optimizer_steps": 180,
+      "total_strategy_optimizer_steps": 40,
+      "total_traversals": 3000,
+      "traversals_per_outer_iteration": 1000,
+      "traversals_per_player": 500,
+      "validation_fraction": 0.1
+    },
+    "formal_timing": false,
+    "game": "leduc",
+    "implementations": [
+      "reference",
+      "optimised"
+    ],
+    "profiles_run_separately": true,
+    "torch_profiler_workload": {
+      "advantage_reservoir_capacity": 100000,
+      "advantage_training_steps": 20,
+      "batch_size": 512,
+      "dropout_probability": 0.0,
+      "iterations": 1,
+      "learning_rate": 0.001,
+      "max_gradient_norm": 10.0,
+      "model_config_id": "leduc_deep_cfr",
+      "optimizer_id": "adam",
+      "seed": 20260811,
+      "snapshot_iterations": [],
+      "state_encoding_id": "leduc_neural",
+      "strategy_reservoir_capacity": 100000,
+      "strategy_training_steps": 20,
+      "total_advantage_optimizer_steps": 40,
+      "total_strategy_optimizer_steps": 20,
+      "total_traversals": 500,
+      "traversals_per_outer_iteration": 500,
+      "traversals_per_player": 250,
+      "validation_fraction": 0.1
+    },
+    "warm_up_before_each_profile": true
+  },
+  "environment": {
+    "available_cpu_count": 8,
+    "available_memory_bytes": 12336918528,
+    "code_revision": "895ff86da86fa24d9f06f567fda905d64328e0f9",
+    "device": "cpu",
+    "executable": "/home/asbch/ac-cfr/.venv/bin/python",
+    "logical_cpu_count": 8,
+    "machine": "x86_64",
+    "numba": "0.66.0",
+    "numpy": "2.4.6",
+    "physical_cpu_count": 8,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "psutil": "7.2.2",
+    "python": "3.12.3",
+    "pytorch": "2.13.0+cu130",
+    "total_memory_bytes": 16514670592,
+    "wsl2": true,
+    "wslconfig_files": [],
+    "wslconfig_observation": "No host .wslconfig was visible; no explicit user CPU or memory cap was found."
+  },
+  "file_descriptions": {
+    "cprofile": "Python and native-call CPU time ranked by cumulative time.",
+    "torch_profiler": "PyTorch operator CPU time ranked by self time."
+  },
+  "files": {
+    "optimised": {
+      "cprofile": "profiles/leduc_optimised_deep_cfr_cprofile.md",
+      "torch_profiler": "profiles/leduc_optimised_deep_cfr_torch_profiler.md"
+    },
+    "reference": {
+      "cprofile": "profiles/leduc_reference_deep_cfr_cprofile.md",
+      "torch_profiler": "profiles/leduc_reference_deep_cfr_torch_profiler.md"
+    }
+  },
+  "profile_id": "deep_cfr",
+  "runs": [
+    {
+      "implementation": "reference",
+      "optimizer_steps": 220,
+      "profiled_seconds": 31.722428747991216,
+      "profiler": "cProfile"
+    },
+    {
+      "implementation": "reference",
+      "optimizer_steps": 60,
+      "profiled_self_cpu_seconds": 7.367597216000003,
+      "profiler": "torch.profiler"
+    },
+    {
+      "implementation": "optimised",
+      "optimizer_steps": 220,
+      "profiled_seconds": 30.131145359002403,
+      "profiler": "cProfile"
+    },
+    {
+      "implementation": "optimised",
+      "optimizer_steps": 60,
+      "profiled_self_cpu_seconds": 7.32000473200003,
+      "profiler": "torch.profiler"
+    }
+  ]
+}

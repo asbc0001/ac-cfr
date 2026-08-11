@@ -6,33 +6,24 @@
       "passed": true,
       "seed_exploitabilities": {
         "20260810": {
-          "final": 0.726331720034584,
-          "initial": 3.948847504001495
+          "final": 2.0512219753598684,
+          "initial": 3.4791854670905256
         },
         "20260811": {
-          "final": 0.9298899882073398,
-          "initial": 3.9952071768389894
+          "final": 1.574591834975887,
+          "initial": 3.851868226236702
         },
         "20260812": {
-          "final": 0.8198643410387112,
-          "initial": 2.7574252241620982
-        },
-        "20260813": {
-          "final": 0.6679166658444006,
-          "initial": 1.7466321109897338
-        },
-        "20260814": {
-          "final": 0.9266070837023869,
-          "initial": 2.3593688307190384
+          "final": 1.7600873468106806,
+          "initial": 1.8533385165187666
         }
       }
     },
     {
       "median_exploitabilities": [
-        2.7574252241620982,
-        1.9510496422300951,
-        1.0357131183712016,
-        0.8198643410387112
+        3.4791854670905256,
+        1.9776140276287104,
+        1.7600873468106806
       ],
       "name": "median_exploitability_decreases_at_every_milestone",
       "passed": true
@@ -40,7 +31,7 @@
   ],
   "configuration": {
     "advantage_reservoir_capacity": 100000,
-    "advantage_training_epochs": 10,
+    "advantage_training_steps": 20,
     "batch_size": 512,
     "dropout_probability": 0.0,
     "early_stopping": false,
@@ -50,20 +41,17 @@
     "milestones": [
       1,
       5,
-      10,
-      20
+      10
     ],
-    "outer_iterations": 20,
+    "outer_iterations": 10,
     "seeds": [
       20260810,
       20260811,
-      20260812,
-      20260813,
-      20260814
+      20260812
     ],
     "solver": "naive_deep_cfr",
     "strategy_reservoir_capacity": 100000,
-    "strategy_training_epochs": 20,
+    "strategy_training_steps": 40,
     "tabular_reference_exploitability": 0.005,
     "timed_region": "solver.train, including configured milestone strategy-network training",
     "traversals_per_outer_iteration": 400,
@@ -83,58 +71,33 @@
   "passed": true,
   "run_files": {
     "20260810": {
-      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
-      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260810/checkpoints/latest.pt",
-      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260810",
+      "code_revision": "895ff86da86fa24d9f06f567fda905d64328e0f9",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260810/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260810",
       "snapshots": [
-        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_1.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_5.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_10.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-seed-20260810_iter_20.pt"
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260810_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260810_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260810/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260810_iter_10.pt"
       ]
     },
     "20260811": {
-      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
-      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260811/checkpoints/latest.pt",
-      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260811",
+      "code_revision": "895ff86da86fa24d9f06f567fda905d64328e0f9",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260811/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260811",
       "snapshots": [
-        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_1.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_5.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_10.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-seed-20260811_iter_20.pt"
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260811_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260811_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260811/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260811_iter_10.pt"
       ]
     },
     "20260812": {
-      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
-      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260812/checkpoints/latest.pt",
-      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260812",
+      "code_revision": "895ff86da86fa24d9f06f567fda905d64328e0f9",
+      "latest_checkpoint": "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260812/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260812",
       "snapshots": [
-        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_1.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_5.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_10.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-seed-20260812_iter_20.pt"
-      ]
-    },
-    "20260813": {
-      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
-      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260813/checkpoints/latest.pt",
-      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260813",
-      "snapshots": [
-        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_1.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_5.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_10.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260813/strategy_snapshots/leduc-naive-deep-cfr-seed-20260813_iter_20.pt"
-      ]
-    },
-    "20260814": {
-      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
-      "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260814/checkpoints/latest.pt",
-      "run_directory": "runs/leduc-naive-deep-cfr-seed-20260814",
-      "snapshots": [
-        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_1.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_5.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_10.pt",
-        "runs/leduc-naive-deep-cfr-seed-20260814/strategy_snapshots/leduc-naive-deep-cfr-seed-20260814_iter_20.pt"
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260812_iter_1.pt",
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260812_iter_5.pt",
+        "runs/leduc-naive-deep-cfr-fixed-steps-seed-20260812/strategy_snapshots/leduc-naive-deep-cfr-fixed-steps-seed-20260812_iter_10.pt"
       ]
     }
   },
