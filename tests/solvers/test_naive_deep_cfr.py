@@ -15,6 +15,7 @@ from ac_cfr.solvers.naive_deep_cfr import (
     _train_network_tensors,
     deep_cfr_regret_matching,
     linear_cfr_loss,
+    train_network_tensor_milestones,
 )
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import UniformReservoir
@@ -213,3 +214,36 @@ def test_network_training_uses_the_exact_fixed_update_budget(
     )
 
     assert completed_steps == training_steps
+
+
+def test_milestone_observation_preserves_one_continuous_training_run() -> None:
+    sample_count = 10
+    baseline = build_deep_cfr_network(ModelConfigId.LEDUC_DEEP_CFR)
+    observed = build_deep_cfr_network(ModelConfigId.LEDUC_DEEP_CFR)
+    observed.load_state_dict(baseline.state_dict())
+    arguments = {
+        "states": torch.zeros((sample_count, LEDUC_NEURAL_STATE_SIZE)),
+        "action_masks": torch.tensor(((True, True, False),) * sample_count),
+        "targets": torch.ones((sample_count, 3)),
+        "sample_iterations": torch.ones(sample_count),
+        "current_iteration": 1,
+        "batch_size": 4,
+        "learning_rate": 1e-3,
+        "data_seed": 10,
+        "training_seed": 11,
+        "strategy_targets": False,
+        "validation_fraction": 0.2,
+        "max_gradient_norm": 10.0,
+    }
+    _train_network_tensors(network=baseline, training_steps=4, **arguments)
+    points = train_network_tensor_milestones(
+        network=observed,
+        update_milestones=(2, 4),
+        **arguments,
+    )
+
+    assert [point.update_steps for point in points] == [2, 4]
+    for baseline_parameter, observed_parameter in zip(
+        baseline.parameters(), observed.parameters(), strict=True
+    ):
+        assert torch.equal(baseline_parameter, observed_parameter)

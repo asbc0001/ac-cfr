@@ -1,7 +1,7 @@
 format_version = 2
 
-# One representative outer iteration for pre-run hardware and network-fit calibration.
-# The long-run iteration budget is deliberately not selected by this preset.
+# Starting production candidate used by collect-once calibration and the later shakedown.
+# The calibration command independently fits one diagnostic network through 32k updates.
 [run]
 implementation = "optimised"
 checkpoint_interval = 1

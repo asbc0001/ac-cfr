@@ -172,6 +172,16 @@ class DeepCFR(NaiveDeepCFR):
             "strategy_reservoir": self._packed_strategy_reservoir.training_state()["rng_state"],
         }
 
+    def collect_calibration_traversals(self, player: int) -> None:
+        """Collect one initial-policy K-traversal sample without running neural training."""
+        if player not in (0, 1):
+            raise ValueError("player must be 0 or 1")
+        if self.iteration != 0 or any(network is not None for network in self.advantage_networks):
+            raise RuntimeError("calibration collection requires a fresh solver")
+        if len(self._packed_advantage_reservoirs[player]) != 0:
+            raise RuntimeError("calibration samples have already been collected for this player")
+        self._collect_player_traversals(player, iteration=1)
+
     def _collect_player_traversals(self, player: int, iteration: int) -> None:
         """Advance K independent sampled traversals in inference batches."""
         for start in range(

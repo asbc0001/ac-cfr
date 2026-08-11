@@ -22,6 +22,10 @@ from ac_cfr.benchmarking.deep_cfr_sensitivity import run_deep_cfr_sensitivity_st
 from ac_cfr.benchmarking.harness import run_tabular_benchmark
 from ac_cfr.benchmarking.mccfr_gate import run_mccfr_gate
 from ac_cfr.benchmarking.mccfr_validation import run_mccfr_validation
+from ac_cfr.benchmarking.modified_hulhe_calibration import (
+    DEFAULT_OUTPUT_DIRECTORY as MODIFIED_HULHE_CALIBRATION_OUTPUT,
+)
+from ac_cfr.benchmarking.modified_hulhe_calibration import run_modified_hulhe_calibration
 from ac_cfr.training.runner import SOLVER_IDS
 
 
@@ -40,6 +44,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "deep-cfr-comparison",
             "deep-cfr-sensitivity",
             "deep-cfr-validation",
+            "modified-hulhe-calibration",
         ),
     )
     parser.add_argument("--output", type=Path)
@@ -111,13 +116,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 progress_callback=print,
             )
             result_label = "configuration study"
-        else:
+        elif arguments.suite == "deep-cfr-validation":
             output_directory = arguments.output or Path("results/deep_cfr")
             result_path = run_deep_cfr_selected_validation(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "selected validation"
+        else:
+            output_directory = arguments.output or MODIFIED_HULHE_CALIBRATION_OUTPUT
+            result_path = run_modified_hulhe_calibration(
+                output_directory,
+                progress_callback=print,
+            )
+            result_label = "modified-HULHE calibration"
         print(f"{result_label}: {result_path}")
         return 0
 

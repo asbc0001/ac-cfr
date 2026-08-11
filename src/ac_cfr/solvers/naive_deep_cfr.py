@@ -1,5 +1,6 @@
 """Reference external-sampling Deep CFR for Leduc poker."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import fsum, isfinite
 from random import Random
@@ -100,6 +101,18 @@ class _LossMetrics:
     validation_samples: int
     training_loss: float
     validation_loss: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkFitPoint:
+    """Loss and cumulative optimiser time after a declared update milestone."""
+
+    update_steps: int
+    training_samples: int
+    validation_samples: int
+    training_loss: float
+    validation_loss: float | None
+    training_seconds: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -645,12 +658,65 @@ def _train_network_tensors(
     max_gradient_norm: float | None,
 ) -> _LossMetrics:
     """Train directly from packed sample tensors with the reference loss and schedule."""
+    point = train_network_tensor_milestones(
+        network=network,
+        states=states,
+        action_masks=action_masks,
+        targets=targets,
+        sample_iterations=sample_iterations,
+        current_iteration=current_iteration,
+        update_milestones=(training_steps,),
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        data_seed=data_seed,
+        training_seed=training_seed,
+        strategy_targets=strategy_targets,
+        validation_fraction=validation_fraction,
+        max_gradient_norm=max_gradient_norm,
+    )[0]
+    return _LossMetrics(
+        training_samples=point.training_samples,
+        validation_samples=point.validation_samples,
+        training_loss=point.training_loss,
+        validation_loss=point.validation_loss,
+    )
+
+
+def train_network_tensor_milestones(
+    *,
+    network: DeepCFRNetwork,
+    states: Tensor,
+    action_masks: Tensor,
+    targets: Tensor,
+    sample_iterations: Tensor,
+    current_iteration: int,
+    update_milestones: tuple[int, ...],
+    batch_size: int,
+    learning_rate: float,
+    data_seed: int,
+    training_seed: int,
+    strategy_targets: bool,
+    validation_fraction: float,
+    max_gradient_norm: float | None,
+    milestone_callback: Callable[[NetworkFitPoint], None] | None = None,
+) -> tuple[NetworkFitPoint, ...]:
+    """Train continuously and evaluate one fixed split at cumulative update milestones."""
     if states.ndim != 2 or len(states) == 0:
         raise ValueError("cannot train a network from empty or malformed states")
     if len(action_masks) != len(states) or len(targets) != len(states):
         raise ValueError("packed action data must match the state count")
     if sample_iterations.shape != (len(states),):
         raise ValueError("packed sample iterations must match the state count")
+    if (
+        not isinstance(update_milestones, tuple)
+        or not update_milestones
+        or any(
+            isinstance(step, bool) or not isinstance(step, int) or step < 1
+            for step in update_milestones
+        )
+        or tuple(sorted(set(update_milestones))) != update_milestones
+    ):
+        raise ValueError("update milestones must be unique, positive, and increasing")
     optimiser = torch.optim.Adam(network.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(data_seed)
     training_indices, validation_indices = _split_training_indices(
@@ -662,57 +728,81 @@ def _train_network_tensors(
         if network_device.type == "cuda"
         else []
     )
+    points: list[NetworkFitPoint] = []
+    completed_steps = 0
+    cumulative_training_seconds = 0.0
     with torch.random.fork_rng(devices=cuda_devices):
         torch.manual_seed(training_seed)
         if cuda_devices:
             torch.cuda.manual_seed(training_seed)
-        _fit_network(
-            network=network,
-            optimiser=optimiser,
-            states=states,
-            targets=targets,
-            action_masks=action_masks,
-            sample_iterations=sample_iterations,
-            training_indices=training_indices,
-            current_iteration=current_iteration,
-            training_steps=training_steps,
-            batch_size=batch_size,
-            generator=generator,
-            strategy_targets=strategy_targets,
-            max_gradient_norm=max_gradient_norm,
-        )
-    training_evaluation_indices = _bounded_evaluation_indices(training_indices, batch_size)
-    validation_evaluation_indices = _bounded_evaluation_indices(validation_indices, batch_size)
-    training_loss = _evaluate_network_loss(
-        network,
-        states,
-        targets,
-        action_masks,
-        sample_iterations,
-        training_evaluation_indices,
-        current_iteration,
-        strategy_targets=strategy_targets,
-    )
-    validation_loss = (
-        _evaluate_network_loss(
-            network,
-            states,
-            targets,
-            action_masks,
-            sample_iterations,
-            validation_evaluation_indices,
-            current_iteration,
-            strategy_targets=strategy_targets,
-        )
-        if len(validation_indices) > 0
-        else None
-    )
-    return _LossMetrics(
-        training_samples=len(training_indices),
-        validation_samples=len(validation_indices),
-        training_loss=training_loss,
-        validation_loss=validation_loss,
-    )
+        for milestone in update_milestones:
+            _synchronise_network_device(network)
+            started = perf_counter()
+            _fit_network(
+                network=network,
+                optimiser=optimiser,
+                states=states,
+                targets=targets,
+                action_masks=action_masks,
+                sample_iterations=sample_iterations,
+                training_indices=training_indices,
+                current_iteration=current_iteration,
+                training_steps=milestone - completed_steps,
+                batch_size=batch_size,
+                generator=generator,
+                strategy_targets=strategy_targets,
+                max_gradient_norm=max_gradient_norm,
+            )
+            _synchronise_network_device(network)
+            cumulative_training_seconds += perf_counter() - started
+            completed_steps = milestone
+            training_evaluation_indices = _bounded_evaluation_indices(training_indices, batch_size)
+            validation_evaluation_indices = _bounded_evaluation_indices(
+                validation_indices, batch_size
+            )
+            training_loss = _evaluate_network_loss(
+                network,
+                states,
+                targets,
+                action_masks,
+                sample_iterations,
+                training_evaluation_indices,
+                current_iteration,
+                strategy_targets=strategy_targets,
+            )
+            validation_loss = (
+                _evaluate_network_loss(
+                    network,
+                    states,
+                    targets,
+                    action_masks,
+                    sample_iterations,
+                    validation_evaluation_indices,
+                    current_iteration,
+                    strategy_targets=strategy_targets,
+                )
+                if len(validation_indices) > 0
+                else None
+            )
+            point = NetworkFitPoint(
+                update_steps=milestone,
+                training_samples=len(training_indices),
+                validation_samples=len(validation_indices),
+                training_loss=training_loss,
+                validation_loss=validation_loss,
+                training_seconds=cumulative_training_seconds,
+            )
+            points.append(point)
+            if milestone_callback is not None:
+                milestone_callback(point)
+    return tuple(points)
+
+
+def _synchronise_network_device(network: DeepCFRNetwork) -> None:
+    """Wait for queued CUDA work so measured optimiser time is complete."""
+    device = next(network.parameters()).device
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def _fit_network(
