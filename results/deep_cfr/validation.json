@@ -60,12 +60,10 @@
   },
   "file_descriptions": {
     "convergence": "Exact measurements for every seed and milestone snapshot.",
-    "plot": "Per-seed and median exact exploitability by iterations and time.",
     "summary": "Median and complete seed range at each milestone."
   },
   "files": {
     "convergence": "convergence.csv",
-    "plot": "plots/reference_convergence.png",
     "summary": "summary.csv"
   },
   "passed": true,

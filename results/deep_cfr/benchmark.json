@@ -1,0 +1,94 @@
+{
+  "about": "Machine-readable configuration, environment, checks, and file index for the fixed-workload Leduc Deep CFR implementation benchmark. This is not a convergence experiment.",
+  "benchmark_id": "deep_cfr",
+  "checks": [
+    {
+      "name": "identical_fixed_workload_completed",
+      "optimizer_steps_per_implementation_repeat": 100,
+      "passed": true,
+      "repeats": 3,
+      "traversals_per_implementation_repeat": 10000
+    },
+    {
+      "name": "timing_memory_and_exact_metrics_are_finite",
+      "passed": true
+    },
+    {
+      "name": "fresh_process_repetitions_reproduce_each_strategy_metric",
+      "passed": true
+    }
+  ],
+  "configuration": {
+    "advantage_reservoir_capacity": 100000,
+    "advantage_training_steps": 10,
+    "batch_size": 512,
+    "dropout_probability": 0.0,
+    "early_stopping": false,
+    "evaluation_outside_timing": true,
+    "execution_order": [
+      "reference, optimised",
+      "optimised, reference",
+      "reference, optimised"
+    ],
+    "game": "leduc",
+    "implementations": [
+      "reference",
+      "optimised"
+    ],
+    "iterations": 4,
+    "learning_rate": 0.001,
+    "max_gradient_norm": 10.0,
+    "memory_sampling_interval_seconds": 0.01,
+    "model_config_id": "leduc_deep_cfr",
+    "optimizer_id": "adam",
+    "pytorch_interop_threads": 1,
+    "pytorch_intraop_threads": 1,
+    "repeats": 3,
+    "seed": 20260811,
+    "snapshot_iterations": [],
+    "state_encoding_id": "leduc_neural",
+    "strategy_reservoir_capacity": 100000,
+    "strategy_training_steps": 20,
+    "timed_region": "solver.train only",
+    "total_optimizer_steps": 100,
+    "total_traversals": 10000,
+    "traversals_per_player": 1250,
+    "validation_fraction": 0.1,
+    "warm_up_before_timing": true
+  },
+  "environment": {
+    "available_cpu_count": 8,
+    "code_revision": "fa8e43daf0ee84bfa42e16955eb9c713524db4e8",
+    "device": "cpu",
+    "executable": "/home/asbch/ac-cfr/.venv/bin/python",
+    "logical_cpu_count": 8,
+    "machine": "x86_64",
+    "numba": "0.66.0",
+    "numpy": "2.4.6",
+    "physical_cpu_count": 8,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "psutil": "7.2.2",
+    "python": "3.12.3",
+    "pytorch": "2.13.0+cu130",
+    "total_memory_bytes": 16514670592
+  },
+  "file_descriptions": {
+    "plot": "Total time, phase timing, traversal throughput, and peak memory.",
+    "runs": "Every isolated timing, phase breakdown, memory peak, and exact metric.",
+    "summary": "Median performance, variation, memory, and exact final quality."
+  },
+  "files": {
+    "plot": "plots/implementation_performance.png",
+    "runs": "benchmark_runs.csv",
+    "summary": "benchmark_summary.csv"
+  },
+  "metric_definitions": {
+    "collection_traversals_per_second": "Fixed-workload traversals divided only by measured traversal collection time.",
+    "end_to_end_traversals_per_second": "Fixed-workload traversals divided by complete solver training time.",
+    "median_absolute_deviation": "Median distance from the median, used as a robust variation measure.",
+    "optimizer_step": "One complete neural-network minibatch update.",
+    "peak_memory": "Highest sampled memory total across the training process and its children.",
+    "traversal": "One sampled root traversal for one traversing player."
+  },
+  "passed": true
+}

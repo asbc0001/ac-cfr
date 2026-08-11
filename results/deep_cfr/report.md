@@ -1,91 +1,59 @@
 # Deep CFR on Leduc
 
 - **Reference learning validation:** PASS
-- **Implementation profiling:** COMPLETE
+- **Matched implementation convergence:** PASS
+- **Implementation profiling and benchmark:** COMPLETE
 
 ## Scope
 
-This evidence checks that the reference Deep CFR implementation learns in the correct direction
-across several seeds and identifies the main costs in the reference and optimised implementations.
-It is not the final Leduc policy or the formal performance comparison.
+These results validate Deep CFR learning and compare the reference and optimised implementations. They use fixed validation workloads rather than a tuned final Leduc configuration.
 
-Deep CFR now uses fixed optimizer-step budgets. Each training step draws one minibatch uniformly,
-with replacement, from the training portion of the relevant uniform reservoir. This follows the
-intended reservoir distribution while preventing later outer iterations from becoming more
-expensive merely because more samples have been collected.
+Training uses fixed minibatch-update budgets sampled uniformly from the reservoirs, so neural-training cost does not grow automatically with reservoir size.
 
-## Reference learning validation
+## Learning and equivalence
 
-Three seeds, `20260810` to `20260812`, each ran for 10 outer iterations. Every iteration performed
-200 external-sampling traversals per player, giving 4,000 traversals per seed. Each freshly
-initialised advantage network received 20 minibatch updates. Average-strategy networks exported
-at iterations 1, 5 and 10 received 40 updates each, giving 520 optimizer steps per seed.
+The reference solver ran three seeds for 10 outer iterations. Median exact exploitability decreased at every milestone:
 
-The networks used three 64-unit hidden layers, Adam with a `0.001` learning rate and batches of
-512. Reservoir capacities were 100,000 samples, 10% of each current reservoir was held out for
-validation, gradient norms were capped at 10, and dropout remained disabled.
+| Iteration | Traversals per seed | Median exploitability | Seed range |
+|---:|---:|---:|---:|
+| 1 | 400 | 3.4792 | 1.8533 to 3.8519 |
+| 5 | 2,000 | 1.9776 | 1.9596 to 2.0180 |
+| 10 | 4,000 | 1.7601 | 1.5746 to 2.0512 |
 
-All three seeds ended with lower exact exploitability than at their first snapshot, and the median
-decreased at every predeclared milestone.
+A separate fixed-seed comparison used identical architecture and training work for both implementations:
 
-| Outer iterations | Traversals per seed | Median exploitability | Seed range | Median training time |
-|---:|---:|---:|---:|---:|
-| 1 | 400 | 3.4792 | 1.8533 to 3.8519 | 10.81 s |
-| 5 | 2,000 | 1.9776 | 1.9596 to 2.0180 | 37.00 s |
-| 10 | 4,000 | 1.7601 | 1.5746 to 2.0512 | 65.91 s |
+| Iteration | Traversals | Reference | Optimised |
+|---:|---:|---:|---:|
+| 1 | 2,500 | 2.9628 | 2.9695 |
+| 2 | 5,000 | 2.1991 | 2.1829 |
+| 4 | 10,000 | 1.7559 | 1.7858 |
 
-The final median remains well above the validated tabular exploitability ceiling of `0.005` chips
-per hand. That is expected for this bounded reference check. A later moderate optimised-only run
-will assess practical Leduc strategy quality.
+Both implementations improve along closely matched trajectories. Their final exploitabilities differ by `0.0299` chips, within the declared `0.1`-chip behavioural tolerance. The comparison uses 140 optimizer steps because it trains a strategy network at all three milestones; the performance benchmark below trains only the final strategy network.
 
-Training and held-out losses use separate samples and remain broadly comparable. They can reveal
-ordinary overfitting, but exact exploitability is the strategy-quality measurement.
+These short validation policies remain far above the validated tabular ceiling of `0.005` chips per hand. They establish correct learning behaviour, not final Deep CFR capability.
 
-## Checkpoints and snapshots
+## Engineering results
 
-Each run saved iteration-labelled checkpoints and a `latest.pt` alias. A checkpoint contains the
-networks, reservoirs, deterministic random-number-generator states, configuration, elapsed
-training time and compact metrics needed to continue from a completed outer iteration.
+The fixed benchmark gives each implementation 10,000 traversals and 100 optimizer steps. Three warmed fresh-process repetitions time only training; evaluation, plotting and startup are excluded. Both use one PyTorch CPU thread because these small Leduc networks run faster without multi-thread scheduling overhead.
 
-At iterations 1, 5 and 10, training froze a separate average-strategy network. Each snapshot was
-loaded independently and converted into a complete Leduc policy for exact evaluation. Advantage
-networks and reservoirs remain training state and are not playable policies.
+| Measurement | Reference | Optimised |
+|---|---:|---:|
+| Median training time | 9.72 s | 1.48 s |
+| Timing MAD | 0.95 s | 0.13 s |
+| Traversal collection rate | 1,098/s | 7,998/s |
+| Peak process-tree PSS | 773.1 MB | 654.1 MB |
 
-## Implementation profiling
+This is a `6.55x` training speedup, `7.29x` higher traversal throughput and `15.4%` lower peak memory for the declared CPU workload. MAD measures typical timing variation around the median. PSS measures process memory without fully double-counting shared pages.
 
-Both solvers were warmed before profiling. The `cProfile` workload used the same seed, network,
-batch size, three outer iterations, 3,000 traversals and 220 optimizer steps for each
-implementation. It took 31.72 profiled seconds for the reference solver and 30.13 for the
-optimised solver. These instrumented times identify bottlenecks and are not formal speed results.
+Profiling supports the timing result: batching reduces network calls from 30,315 to 365, packed handling reduces Python-visible calls from 19.3 million to 1.5 million, and optimised traversal uses about 0.6 profiled seconds versus 6.3 seconds for recursive reference traversal. Profiled times themselves are diagnostic because instrumentation changes execution speed.
 
-The separate PyTorch operator workload used 500 traversals and 60 optimizer steps. It was large
-enough to include repeated inference, forward passes, backpropagation and Adam updates while
-remaining short. Tensor-shape and memory tracing were disabled because their extra overhead was
-not needed for this question.
+## Reproducibility
 
-The profiles show:
+Reference runs exported independently loadable policies at iterations 1, 5 and 10. Their checkpoints contain networks, reservoirs, random-number-generator states, resolved configuration, elapsed training time and metrics required for compatible resume.
 
-- fixed neural training dominates both implementations, with backpropagation, matrix operations
-  and Adam updates accounting for most CPU time;
-- batched inference reduces network forward calls from 30,315 to 365;
-- packed storage and batching reduce Python-visible calls from 19.3 million to 1.5 million; and
-- optimised traversal occupies about 0.6 cumulative profiled seconds, compared with about 6.3
-  seconds for recursive reference traversal.
+- `validation.json`, `convergence.csv`, and `summary.csv` contain the multi-seed reference evidence.
+- `comparison.json`, `implementation_convergence.csv`, and `plots/implementation_convergence.png` contain the matched implementation comparison.
+- `benchmark.json`, `benchmark_*.csv`, and `plots/implementation_performance.png` contain the performance evidence.
+- `profiling.json` and `profiles/` contain the diagnostic workloads and profiles.
 
-The optimised traversal path is materially leaner, but the identical neural-training workload now
-dominates end-to-end time. Multiprocessing is therefore not justified for this small Leduc CPU
-workload. Formal repeated timing, throughput and memory measurement remains separate from these
-diagnostic profiles.
-
-## Files
-
-- `convergence.csv`: full-precision exact measurements for every seed and milestone.
-- `summary.csv`: medians and complete seed ranges at each milestone.
-- `validation.json`: configuration, checks and links to run-local checkpoints and snapshots.
-- `plots/reference_convergence.png`: per-seed and median exploitability by iterations and time.
-- `profiling.json`: exact profile workloads, environment and profile file index.
-- `profiles/*_cprofile.md`: Python and native-call CPU paths ranked by cumulative time.
-- `profiles/*_torch_profiler.md`: PyTorch operations ranked by self CPU time.
-
-Large checkpoints and neural snapshots remain under ignored `runs/` directories. The compact
-validation and profiling evidence in this directory is suitable for version control.
+Large checkpoints and neural snapshots remain under ignored `runs/` directories.

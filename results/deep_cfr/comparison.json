@@ -1,0 +1,87 @@
+{
+  "about": "Machine-readable configuration and checks for matched reference-versus-optimised Deep CFR convergence on Leduc.",
+  "benchmark_id": "deep_cfr",
+  "checks": [
+    {
+      "name": "matched_milestones_completed",
+      "passed": true
+    },
+    {
+      "name": "metrics_are_finite_and_training_time_increases",
+      "passed": true
+    },
+    {
+      "name": "both_implementations_reduce_exploitability",
+      "passed": true
+    },
+    {
+      "absolute_difference": 0.029913815702291346,
+      "absolute_tolerance": 0.1,
+      "name": "final_exploitabilities_agree_within_0_1_chips",
+      "passed": true
+    }
+  ],
+  "configuration": {
+    "advantage_reservoir_capacity": 100000,
+    "advantage_training_steps": 10,
+    "batch_size": 512,
+    "dropout_probability": 0.0,
+    "early_stopping": false,
+    "evaluation_outside_training_time": true,
+    "final_exploitability_tolerance": 0.1,
+    "game": "leduc",
+    "implementations": [
+      "reference",
+      "optimised"
+    ],
+    "iterations": 4,
+    "learning_rate": 0.001,
+    "max_gradient_norm": 10.0,
+    "milestones": [
+      1,
+      2,
+      4
+    ],
+    "model_config_id": "leduc_deep_cfr",
+    "optimizer_id": "adam",
+    "pytorch_interop_threads": 1,
+    "pytorch_intraop_threads": 1,
+    "seed": 20260811,
+    "snapshot_iterations": [
+      1,
+      2
+    ],
+    "state_encoding_id": "leduc_neural",
+    "strategy_reservoir_capacity": 100000,
+    "strategy_training_steps": 20,
+    "total_optimizer_steps": 140,
+    "total_traversals": 10000,
+    "traversals_per_player": 1250,
+    "validation_fraction": 0.1
+  },
+  "environment": {
+    "available_cpu_count": 8,
+    "code_revision": "fa8e43daf0ee84bfa42e16955eb9c713524db4e8",
+    "device": "cpu",
+    "executable": "/home/asbch/ac-cfr/.venv/bin/python",
+    "logical_cpu_count": 8,
+    "machine": "x86_64",
+    "numba": "0.66.0",
+    "numpy": "2.4.6",
+    "physical_cpu_count": 8,
+    "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "psutil": "7.2.2",
+    "python": "3.12.3",
+    "pytorch": "2.13.0+cu130",
+    "total_memory_bytes": 16514670592
+  },
+  "file_descriptions": {
+    "convergence": "Exact metrics at every matched implementation milestone.",
+    "plot": "Reference and optimised exploitability by iterations and training time."
+  },
+  "files": {
+    "convergence": "implementation_convergence.csv",
+    "plot": "plots/implementation_convergence.png"
+  },
+  "passed": true
+}

@@ -187,4 +187,4 @@ Development uses a single `main` branch. Run the local checks before each direct
 
 Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
 
-Next: complete the fixed-workload Deep CFR benchmark and moderate optimised Leduc validation.
+Next: complete the multi-seed and moderate optimised Leduc Deep CFR validation.
