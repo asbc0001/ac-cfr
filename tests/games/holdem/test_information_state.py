@@ -3,6 +3,11 @@ from dataclasses import replace
 from ac_cfr.games.base import Action
 from ac_cfr.games.holdem.canonicalisation import canonicalise_visible_cards
 from ac_cfr.games.holdem.engine import HoldemConfig, HoldemGame, HoldemState
+from ac_cfr.games.holdem.neural import (
+    HOLD_EM_NEURAL_STATE_SIZE,
+    encode_holdem_information_state,
+    holdem_action_mask,
+)
 
 
 def _deal_modified(cards: tuple[int, ...]) -> HoldemState:
@@ -51,3 +56,12 @@ def test_information_state_excludes_opponent_cards_and_preserves_public_history(
     )
     other_position = replace(first, configuration=button_one_configuration)
     assert other_position.information_state().encoding != first.information_state().encoding
+
+    neural_state = encode_holdem_information_state(first.information_state())
+    renamed_state = _deal_modified(_rename_suits((0, 4, 8, 12, 16, 20, 24), (1, 2, 3, 0)))
+    assert len(neural_state) == HOLD_EM_NEURAL_STATE_SIZE
+    assert (
+        neural_state.tolist()
+        == encode_holdem_information_state(renamed_state.information_state()).tolist()
+    )
+    assert holdem_action_mask(first.legal_actions()).tolist() == [False, True, True]

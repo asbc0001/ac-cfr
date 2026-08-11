@@ -17,6 +17,8 @@ DEEP_CFR_RESERVOIR_SCHEMA_VERSION = 1
 NeuralState = tuple[float, ...]
 ActionMask = tuple[bool, ...]
 ActionValues = tuple[float, ...]
+PackedStates = NDArray[np.float16] | NDArray[np.float32]
+_DEFAULT_PACKED_STATE_DTYPE = np.dtype(np.float32)
 
 
 class UniformReservoir[SampleT]:
@@ -100,16 +102,25 @@ class UniformReservoir[SampleT]:
 class PackedAdvantageReservoir:
     """Store one player's uniform advantage reservoir in contiguous arrays."""
 
-    def __init__(self, capacity: int, rng: Random) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        rng: Random,
+        *,
+        state_size: int = LEDUC_NEURAL_STATE_SIZE,
+        action_count: int = LEDUC_ACTION_COUNT,
+        state_dtype: np.dtype[np.floating] = _DEFAULT_PACKED_STATE_DTYPE,
+    ) -> None:
         _validate_packed_reservoir_arguments(capacity, rng)
+        _validate_packed_layout(state_size, action_count, state_dtype)
         self._capacity = capacity
         self._rng = rng
         self._size = 0
         self._samples_seen = 0
-        self._states = np.empty((capacity, LEDUC_NEURAL_STATE_SIZE), dtype=np.float32)
-        self._action_masks = np.empty((capacity, LEDUC_ACTION_COUNT), dtype=np.bool)
+        self._states = np.empty((capacity, state_size), dtype=state_dtype)
+        self._action_masks = np.empty((capacity, action_count), dtype=np.bool)
         self._iterations = np.empty(capacity, dtype=np.uint32)
-        self._advantages = np.empty((capacity, LEDUC_ACTION_COUNT), dtype=np.float32)
+        self._advantages = np.empty((capacity, action_count), dtype=np.float32)
 
     @property
     def capacity(self) -> int:
@@ -135,10 +146,25 @@ class PackedAdvantageReservoir:
         )
 
     @property
+    def bytes_per_sample(self) -> int:
+        """Return the exact allocated bytes for one packed row."""
+        return self.resident_bytes // self._capacity
+
+    @property
+    def state_size(self) -> int:
+        """Return the stored neural-state width."""
+        return int(self._states.shape[1])
+
+    @property
+    def action_count(self) -> int:
+        """Return the canonical action width."""
+        return int(self._action_masks.shape[1])
+
+    @property
     def arrays(
         self,
     ) -> tuple[
-        NDArray[np.float32],
+        PackedStates,
         NDArray[np.bool],
         NDArray[np.uint32],
         NDArray[np.float32],
@@ -221,6 +247,57 @@ class PackedAdvantageReservoir:
             self._iterations[index] = sample.iteration
             self._advantages[index] = sample.advantages
 
+    def restore_arrays(
+        self,
+        *,
+        states: PackedStates,
+        action_masks: NDArray[np.bool],
+        iterations: NDArray[np.uint32],
+        advantages: NDArray[np.float32],
+        samples_seen: int,
+        rng_state: object,
+    ) -> None:
+        """Restore validated packed contents without materialising sample objects."""
+        restored_rng = _validated_packed_arrays(
+            states=states,
+            action_masks=action_masks,
+            iterations=iterations,
+            targets=advantages,
+            samples_seen=samples_seen,
+            capacity=self._capacity,
+            expected_state_dtype=self._states.dtype,
+            state_size=self.state_size,
+            action_count=self.action_count,
+            rng_state=rng_state,
+            normalised=False,
+        )
+        self._restore_array_values(
+            states,
+            action_masks,
+            iterations,
+            advantages,
+            samples_seen,
+            restored_rng,
+        )
+
+    def _restore_array_values(
+        self,
+        states: PackedStates,
+        action_masks: NDArray[np.bool],
+        iterations: NDArray[np.uint32],
+        advantages: NDArray[np.float32],
+        samples_seen: int,
+        rng: Random,
+    ) -> None:
+        size = len(states)
+        self._states[:size] = states
+        self._action_masks[:size] = action_masks
+        self._iterations[:size] = iterations
+        self._advantages[:size] = advantages
+        self._size = size
+        self._samples_seen = samples_seen
+        self._rng = rng
+
     def _admission_index(self) -> int | None:
         self._samples_seen += 1
         if self._size < self._capacity:
@@ -234,17 +311,26 @@ class PackedAdvantageReservoir:
 class PackedStrategyReservoir:
     """Store the shared uniform strategy reservoir in contiguous arrays."""
 
-    def __init__(self, capacity: int, rng: Random) -> None:
+    def __init__(
+        self,
+        capacity: int,
+        rng: Random,
+        *,
+        state_size: int = LEDUC_NEURAL_STATE_SIZE,
+        action_count: int = LEDUC_ACTION_COUNT,
+        state_dtype: np.dtype[np.floating] = _DEFAULT_PACKED_STATE_DTYPE,
+    ) -> None:
         _validate_packed_reservoir_arguments(capacity, rng)
+        _validate_packed_layout(state_size, action_count, state_dtype)
         self._capacity = capacity
         self._rng = rng
         self._size = 0
         self._samples_seen = 0
         self._players = np.empty(capacity, dtype=np.int8)
-        self._states = np.empty((capacity, LEDUC_NEURAL_STATE_SIZE), dtype=np.float32)
-        self._action_masks = np.empty((capacity, LEDUC_ACTION_COUNT), dtype=np.bool)
+        self._states = np.empty((capacity, state_size), dtype=state_dtype)
+        self._action_masks = np.empty((capacity, action_count), dtype=np.bool)
         self._iterations = np.empty(capacity, dtype=np.uint32)
-        self._strategies = np.empty((capacity, LEDUC_ACTION_COUNT), dtype=np.float32)
+        self._strategies = np.empty((capacity, action_count), dtype=np.float32)
 
     @property
     def capacity(self) -> int:
@@ -271,11 +357,26 @@ class PackedStrategyReservoir:
         )
 
     @property
+    def bytes_per_sample(self) -> int:
+        """Return the exact allocated bytes for one packed row."""
+        return self.resident_bytes // self._capacity
+
+    @property
+    def state_size(self) -> int:
+        """Return the stored neural-state width."""
+        return int(self._states.shape[1])
+
+    @property
+    def action_count(self) -> int:
+        """Return the canonical action width."""
+        return int(self._action_masks.shape[1])
+
+    @property
     def arrays(
         self,
     ) -> tuple[
         NDArray[np.int8],
-        NDArray[np.float32],
+        PackedStates,
         NDArray[np.bool],
         NDArray[np.uint32],
         NDArray[np.float32],
@@ -371,6 +472,45 @@ class PackedStrategyReservoir:
             self._iterations[index] = sample.iteration
             self._strategies[index] = sample.strategy
 
+    def restore_arrays(
+        self,
+        *,
+        players: NDArray[np.int8],
+        states: PackedStates,
+        action_masks: NDArray[np.bool],
+        iterations: NDArray[np.uint32],
+        strategies: NDArray[np.float32],
+        samples_seen: int,
+        rng_state: object,
+    ) -> None:
+        """Restore validated packed contents without materialising sample objects."""
+        if players.shape != (len(states),) or players.dtype != np.int8:
+            raise ValueError("packed players have an incompatible layout")
+        if np.any((players < 0) | (players > 1)):
+            raise ValueError("packed players must be zero or one")
+        restored_rng = _validated_packed_arrays(
+            states=states,
+            action_masks=action_masks,
+            iterations=iterations,
+            targets=strategies,
+            samples_seen=samples_seen,
+            capacity=self._capacity,
+            expected_state_dtype=self._states.dtype,
+            state_size=self.state_size,
+            action_count=self.action_count,
+            rng_state=rng_state,
+            normalised=True,
+        )
+        size = len(states)
+        self._players[:size] = players
+        self._states[:size] = states
+        self._action_masks[:size] = action_masks
+        self._iterations[:size] = iterations
+        self._strategies[:size] = strategies
+        self._size = size
+        self._samples_seen = samples_seen
+        self._rng = restored_rng
+
     def _admission_index(self) -> int | None:
         self._samples_seen += 1
         if self._size < self._capacity:
@@ -415,14 +555,14 @@ class StrategySample:
 
 
 def _validate_common_sample(state: NeuralState, action_mask: ActionMask, iteration: int) -> None:
-    if not isinstance(state, tuple) or len(state) != LEDUC_NEURAL_STATE_SIZE:
-        raise ValueError(f"state must contain {LEDUC_NEURAL_STATE_SIZE} values")
+    if not isinstance(state, tuple) or not state:
+        raise ValueError("state must contain at least one value")
     if any(isinstance(value, bool) or not isinstance(value, Real) for value in state):
         raise TypeError("state values must be real numbers")
     if any(not isfinite(float(value)) for value in state):
         raise ValueError("state values must be finite")
-    if not isinstance(action_mask, tuple) or len(action_mask) != LEDUC_ACTION_COUNT:
-        raise ValueError(f"action_mask must contain {LEDUC_ACTION_COUNT} values")
+    if not isinstance(action_mask, tuple) or not action_mask:
+        raise ValueError("action_mask must contain at least one value")
     if any(not isinstance(value, bool) for value in action_mask):
         raise TypeError("action_mask values must be booleans")
     if not any(action_mask):
@@ -440,8 +580,8 @@ def _validate_action_values(
     *,
     normalised: bool = False,
 ) -> None:
-    if not isinstance(values, tuple) or len(values) != LEDUC_ACTION_COUNT:
-        raise ValueError(f"{name} must contain {LEDUC_ACTION_COUNT} values")
+    if not isinstance(values, tuple) or len(values) != len(action_mask):
+        raise ValueError(f"{name} must match the action mask")
     for value, is_legal in zip(values, action_mask, strict=True):
         if isinstance(value, bool) or not isinstance(value, Real):
             raise TypeError(f"{name} values must be real numbers")
@@ -464,6 +604,20 @@ def _validate_packed_reservoir_arguments(capacity: int, rng: Random) -> None:
         raise ValueError("capacity must be positive")
     if not isinstance(rng, Random):
         raise TypeError("rng must be a random.Random instance")
+
+
+def _validate_packed_layout(
+    state_size: int,
+    action_count: int,
+    state_dtype: np.dtype[np.floating],
+) -> None:
+    for name, value in (("state_size", state_size), ("action_count", action_count)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{name} must be an integer")
+        if value < 1:
+            raise ValueError(f"{name} must be positive")
+    if np.dtype(state_dtype) not in (np.dtype(np.float16), np.dtype(np.float32)):
+        raise ValueError("state_dtype must be float16 or float32")
 
 
 def _normalised_strategy_tuple(
@@ -503,6 +657,62 @@ def _validated_restore_state[SampleT](
         raise TypeError("samples_seen must be an integer")
     if samples_seen < 0 or len(samples) != min(samples_seen, capacity):
         raise ValueError("reservoir occupancy is inconsistent")
+    if not isinstance(rng_state, tuple):
+        raise ValueError("reservoir RNG state is invalid")
+    restored_rng = Random()
+    try:
+        restored_rng.setstate(rng_state)
+    except (TypeError, ValueError) as error:
+        raise ValueError("reservoir RNG state is invalid") from error
+    return restored_rng
+
+
+def _validated_packed_arrays(
+    *,
+    states: PackedStates,
+    action_masks: NDArray[np.bool],
+    iterations: NDArray[np.uint32],
+    targets: NDArray[np.float32],
+    samples_seen: int,
+    capacity: int,
+    expected_state_dtype: np.dtype[np.floating],
+    state_size: int,
+    action_count: int,
+    rng_state: object,
+    normalised: bool,
+) -> Random:
+    sample_count = len(states)
+    if states.shape != (sample_count, state_size) or states.dtype != expected_state_dtype:
+        raise ValueError("packed states have an incompatible layout")
+    if action_masks.shape != (sample_count, action_count) or action_masks.dtype != np.bool:
+        raise ValueError("packed action masks have an incompatible layout")
+    if iterations.shape != (sample_count,) or iterations.dtype != np.uint32:
+        raise ValueError("packed iterations have an incompatible layout")
+    if targets.shape != (sample_count, action_count) or targets.dtype != np.float32:
+        raise ValueError("packed targets have an incompatible layout")
+    if not np.all(np.isfinite(states)) or not np.all(np.isfinite(targets)):
+        raise ValueError("packed floating-point values must be finite")
+    if sample_count and (
+        not np.all(np.any(action_masks, axis=1))
+        or np.any(targets[~action_masks] != 0.0)
+        or np.any(iterations == 0)
+    ):
+        raise ValueError("packed samples violate the Deep CFR schema")
+    if normalised and sample_count:
+        legal_targets = np.where(action_masks, targets, 0.0)
+        if np.any(legal_targets < 0.0) or not np.allclose(
+            legal_targets.sum(axis=1),
+            1.0,
+            rtol=0.0,
+            atol=1e-6,
+        ):
+            raise ValueError("packed strategies must be normalised")
+    if (
+        isinstance(samples_seen, bool)
+        or not isinstance(samples_seen, int)
+        or sample_count != min(samples_seen, capacity)
+    ):
+        raise ValueError("packed reservoir occupancy is inconsistent")
     if not isinstance(rng_state, tuple):
         raise ValueError("reservoir RNG state is invalid")
     restored_rng = Random()

@@ -1,4 +1,4 @@
-"""Validated inference snapshots for Leduc Deep CFR strategies."""
+"""Validated inference snapshots for playable Deep CFR strategies."""
 
 import pickle
 from dataclasses import dataclass
@@ -17,6 +17,7 @@ from ac_cfr.common.config import (
     StateEncodingId,
 )
 from ac_cfr.games.base import GameId
+from ac_cfr.games.holdem.engine import HoldemConfig
 from ac_cfr.games.leduc_neural import build_leduc_neural_data
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.models import (
@@ -25,7 +26,11 @@ from ac_cfr.models import (
     build_deep_cfr_network,
     deep_cfr_network_config,
 )
-from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, tree_compatibility_digest
+from ac_cfr.persistence.compatibility import (
+    ACTION_SPACE_ID,
+    holdem_compatibility_digest,
+    tree_compatibility_digest,
+)
 from ac_cfr.persistence.files import atomic_binary_writer
 from ac_cfr.training.config import DeepCFRTrainingConfig
 
@@ -67,7 +72,7 @@ def export_deep_cfr_snapshot(
     path: Path,
     *,
     network: DeepCFRNetwork,
-    tree: IndexedGameTree,
+    game: IndexedGameTree | HoldemConfig,
     config: DeepCFRTrainingConfig,
     implementation: DeepCFRImplementationId,
     snapshot_id: str,
@@ -80,7 +85,12 @@ def export_deep_cfr_snapshot(
         raise TypeError("network must be a DeepCFRNetwork")
     if not isinstance(implementation, DeepCFRImplementationId):
         raise TypeError("implementation must be a DeepCFRImplementationId")
-    _validate_tree(tree)
+    game_id, game_version, state_encoding, compatibility_digest = _game_metadata(game)
+    if (
+        config.game_configuration_id.value != game_version
+        or config.state_encoding_id.value != state_encoding
+    ):
+        raise ValueError("training configuration does not match the snapshot game")
     if network.config != deep_cfr_network_config(
         config.model_config_id,
         dropout_probability=config.dropout_probability,
@@ -99,17 +109,17 @@ def export_deep_cfr_snapshot(
         artifact_schema_version=DEEP_CFR_SNAPSHOT_SCHEMA_VERSION,
         project_version=PROJECT_VERSION,
         snapshot_id=snapshot_id,
-        game=GameId.LEDUC.value,
-        game_version=GameConfigurationId.LEDUC.value,
+        game=game_id,
+        game_version=game_version,
         solver=implementation.value,
         training_iteration=iteration,
         run_id=run_id,
         seed=config.seed,
         source_checkpoint_id=source_checkpoint_id,
         model_config_id=config.model_config_id.value,
-        state_encoding=config.state_encoding_id.value,
+        state_encoding=state_encoding,
         action_space=ACTION_SPACE_ID,
-        tree_digest=tree_compatibility_digest(tree),
+        tree_digest=compatibility_digest,
         architecture_config=network.config.to_dict(),
     )
     payload = {
@@ -127,12 +137,12 @@ def export_deep_cfr_snapshot(
 
 def load_deep_cfr_snapshot(
     path: Path,
-    tree: IndexedGameTree,
+    game: IndexedGameTree | HoldemConfig,
     *,
     map_location: str | torch.device = "cpu",
 ) -> LoadedDeepCFRSnapshot:
-    """Safely load and validate one frozen Leduc average-strategy network."""
-    _validate_tree(tree)
+    """Safely load and validate one frozen Deep CFR average-strategy network."""
+    _game_metadata(game)
     try:
         payload = torch.load(path, map_location=map_location, weights_only=True)
     except (OSError, RuntimeError, EOFError, pickle.UnpicklingError) as error:
@@ -140,7 +150,7 @@ def load_deep_cfr_snapshot(
     if not isinstance(payload, dict) or set(payload) != {"metadata", "strategy_network"}:
         raise ValueError("Deep CFR snapshot fields are incomplete or unexpected")
 
-    metadata = _validated_metadata(payload["metadata"], tree)
+    metadata = _validated_metadata(payload["metadata"], game)
     try:
         model_config_id = ModelConfigId(metadata.model_config_id)
         raw_dropout_probability = metadata.architecture_config["dropout_probability"]
@@ -168,7 +178,7 @@ def deep_cfr_policy(
     network: DeepCFRNetwork,
 ) -> NDArray[np.float64]:
     """Evaluate a frozen network into the exact evaluator's flat policy layout."""
-    _validate_tree(tree)
+    _game_metadata(tree)
     if not isinstance(network, DeepCFRNetwork):
         raise TypeError("network must be a DeepCFRNetwork")
     neural_data = build_leduc_neural_data(tree)
@@ -198,7 +208,10 @@ def deep_cfr_policy(
     return policy
 
 
-def _validated_metadata(value: object, tree: IndexedGameTree) -> DeepCFRSnapshotMetadata:
+def _validated_metadata(
+    value: object,
+    game: IndexedGameTree | HoldemConfig,
+) -> DeepCFRSnapshotMetadata:
     """Parse exact snapshot metadata and reject incompatible identifiers."""
     expected_fields = set(DeepCFRSnapshotMetadata.__dataclass_fields__)
     if not isinstance(value, dict) or set(value) != expected_fields:
@@ -207,14 +220,15 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> DeepCFRSnapshot
         metadata = DeepCFRSnapshotMetadata(**value)
     except TypeError as error:
         raise ValueError("Deep CFR snapshot metadata is invalid") from error
+    game_id, game_version, state_encoding, compatibility_digest = _game_metadata(game)
     expected = {
         "artifact_schema_version": DEEP_CFR_SNAPSHOT_SCHEMA_VERSION,
         "project_version": PROJECT_VERSION,
-        "game": GameId.LEDUC.value,
-        "game_version": GameConfigurationId.LEDUC.value,
-        "state_encoding": StateEncodingId.LEDUC_NEURAL.value,
+        "game": game_id,
+        "game_version": game_version,
+        "state_encoding": state_encoding,
         "action_space": ACTION_SPACE_ID,
-        "tree_digest": tree_compatibility_digest(tree),
+        "tree_digest": compatibility_digest,
     }
     for field, expected_value in expected.items():
         if getattr(metadata, field) != expected_value:
@@ -268,11 +282,28 @@ def _load_network(
     return network
 
 
-def _validate_tree(tree: IndexedGameTree) -> None:
-    if not isinstance(tree, IndexedGameTree):
-        raise TypeError("tree must be an IndexedGameTree")
-    if tree.game_id is not GameId.LEDUC:
-        raise ValueError("Deep CFR snapshots currently support only Leduc")
+def _game_metadata(
+    game: IndexedGameTree | HoldemConfig,
+) -> tuple[str, str, str, str]:
+    if isinstance(game, IndexedGameTree):
+        if game.game_id is not GameId.LEDUC:
+            raise ValueError("indexed Deep CFR snapshots require Leduc")
+        return (
+            GameId.LEDUC.value,
+            GameConfigurationId.LEDUC.value,
+            StateEncodingId.LEDUC_NEURAL.value,
+            tree_compatibility_digest(game),
+        )
+    if isinstance(game, HoldemConfig):
+        if game.configuration_id is not GameConfigurationId.MODIFIED_HULHE:
+            raise ValueError("Hold'em Deep CFR snapshots require modified HULHE")
+        return (
+            GameId.HOLD_EM.value,
+            GameConfigurationId.MODIFIED_HULHE.value,
+            StateEncodingId.HOLD_EM.value,
+            holdem_compatibility_digest(game),
+        )
+    raise TypeError("game must be an IndexedGameTree or HoldemConfig")
 
 
 def _validate_positive_iteration(iteration: int, maximum: int | None = None) -> None:

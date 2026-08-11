@@ -1,4 +1,4 @@
-"""Batched external-sampling Deep CFR for Leduc poker."""
+"""Batched external-sampling Deep CFR for Leduc and on-demand Hold'em."""
 
 from collections.abc import Generator
 from contextlib import suppress
@@ -12,10 +12,12 @@ from numba import njit
 from numpy.typing import NDArray
 
 from ac_cfr.common.rng import RngStream, SeedDeriver
-from ac_cfr.games.base import NodeType
+from ac_cfr.games.base import ACTION_ORDER, InformationState, NodeType
+from ac_cfr.games.holdem.engine import HoldemConfig, HoldemGame, HoldemState
+from ac_cfr.games.holdem.neural import encode_holdem_information_state, holdem_action_mask
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT
 from ac_cfr.games.tree import IndexedGameTree
-from ac_cfr.models import DeepCFRNetwork
+from ac_cfr.models import DeepCFRNetwork, DeepCFRNetworkConfig, deep_cfr_network_config
 from ac_cfr.solvers.naive_deep_cfr import (
     NaiveDeepCFR,
     NetworkTrainingMetrics,
@@ -31,7 +33,8 @@ from ac_cfr.training.reservoirs import PackedAdvantageReservoir, PackedStrategyR
 class _InferenceRequest:
     """One paused traversal waiting for a current-strategy prediction."""
 
-    information_set_id: int
+    state: NDArray[np.float32]
+    action_mask: NDArray[np.bool]
     player: int
 
 
@@ -51,29 +54,96 @@ class DeepCFR(NaiveDeepCFR):
 
     def __init__(
         self,
-        tree: IndexedGameTree,
+        game: IndexedGameTree | HoldemConfig,
         config: DeepCFRTrainingConfig,
         runtime: DeepCFRRuntimeConfig,
     ) -> None:
-        super().__init__(tree, config, runtime)
+        if isinstance(game, IndexedGameTree):
+            super().__init__(game, config, runtime)
+            self._holdem_configuration: HoldemConfig | None = None
+        elif isinstance(game, HoldemConfig):
+            self._initialise_holdem(game, config, runtime)
+        else:
+            raise TypeError("game must be an IndexedGameTree or HoldemConfig")
         self._inference_batch_size = runtime.inference_batch_size
         warm_up_probabilities = np.asarray((0.5, 0.5), dtype=np.float64)
         _single_positive_position(warm_up_probabilities)
         _sample_position_from_draw(warm_up_probabilities, 0.0)
         seed_deriver = SeedDeriver(config.seed)
+        architecture = self._network_config
+        state_dtype = (
+            np.dtype(np.float16) if self._holdem_configuration is not None else np.dtype(np.float32)
+        )
+        reservoir_arguments = {
+            "state_size": architecture.input_size,
+            "action_count": architecture.output_size,
+            "state_dtype": state_dtype,
+        }
         self._packed_advantage_reservoirs = (
             PackedAdvantageReservoir(
                 config.advantage_reservoir_capacity,
                 seed_deriver.python_rng(RngStream.RESERVOIR, 0),
+                **reservoir_arguments,
             ),
             PackedAdvantageReservoir(
                 config.advantage_reservoir_capacity,
                 seed_deriver.python_rng(RngStream.RESERVOIR, 1),
+                **reservoir_arguments,
             ),
         )
         self._packed_strategy_reservoir = PackedStrategyReservoir(
             config.strategy_reservoir_capacity,
             seed_deriver.python_rng(RngStream.RESERVOIR, 2),
+            **reservoir_arguments,
+        )
+
+    def _initialise_holdem(
+        self,
+        game: HoldemConfig,
+        config: DeepCFRTrainingConfig,
+        runtime: DeepCFRRuntimeConfig,
+    ) -> None:
+        """Initialise the shared training schedule without constructing a game tree."""
+        if not isinstance(config, DeepCFRTrainingConfig):
+            raise TypeError("config must be a DeepCFRTrainingConfig")
+        if game.configuration_id is not config.game_configuration_id:
+            raise ValueError("Hold'em rules do not match the Deep CFR configuration")
+        if not isinstance(runtime, DeepCFRRuntimeConfig):
+            raise TypeError("runtime must be a DeepCFRRuntimeConfig")
+        seed_deriver = SeedDeriver(config.seed)
+        self._tree = None
+        self._neural_data = None
+        self._holdem_configuration = game
+        self._config = config
+        self._runtime = runtime
+        self._chance_rng = seed_deriver.python_rng(RngStream.CHANCE)
+        self._policy_rng = seed_deriver.python_rng(RngStream.POLICY)
+        self._advantage_networks = [None, None]
+        self._snapshot_networks = {}
+        self._final_strategy_network = None
+        self._training_metrics = []
+        self._iteration = 0
+        self._traversal_seconds = 0.0
+        self._advantage_training_seconds = 0.0
+        self._strategy_training_seconds = 0.0
+
+    @property
+    def holdem_configuration(self) -> HoldemConfig | None:
+        """Return the on-demand Hold'em rules, or None for indexed Leduc."""
+        return self._holdem_configuration
+
+    @property
+    def tree(self) -> IndexedGameTree:
+        """Return the indexed Leduc tree; Hold'em deliberately has no full tree."""
+        if self._tree is None:
+            raise ValueError("on-demand Hold'em Deep CFR has no indexed game tree")
+        return self._tree
+
+    @property
+    def _network_config(self) -> DeepCFRNetworkConfig:
+        return deep_cfr_network_config(
+            self.config.model_config_id,
+            dropout_probability=self.config.dropout_probability,
         )
 
     @property
@@ -113,16 +183,34 @@ class DeepCFR(NaiveDeepCFR):
                 start + self._inference_batch_size,
                 self.config.traversals_per_player,
             )
-            traversals = [
-                self._traverse_batched(
-                    node_id=0,
-                    traverser=player,
-                    iteration=iteration,
-                    sampled_opponent_actions={},
-                    randomness=self._trajectory_randomness(iteration, player, traversal_index),
+            traversals: list[_Traversal] = []
+            for traversal_index in range(start, stop):
+                randomness = self._trajectory_randomness(
+                    iteration,
+                    player,
+                    traversal_index,
                 )
-                for traversal_index in range(start, stop)
-            ]
+                if self._holdem_configuration is None:
+                    traversals.append(
+                        self._traverse_batched(
+                            node_id=0,
+                            traverser=player,
+                            iteration=iteration,
+                            sampled_opponent_actions={},
+                            randomness=randomness,
+                        )
+                    )
+                else:
+                    root = HoldemGame().initial_state(self._holdem_configuration)
+                    traversals.append(
+                        self._traverse_holdem_batched(
+                            state=root,
+                            traverser=player,
+                            iteration=iteration,
+                            sampled_opponent_actions={},
+                            randomness=randomness,
+                        )
+                    )
             self._resolve_traversals(traversals)
 
     def _resolve_traversals(self, traversals: list[_Traversal]) -> None:
@@ -143,12 +231,8 @@ class DeepCFR(NaiveDeepCFR):
         requests: list[_InferenceRequest],
     ) -> NDArray[np.float64]:
         """Evaluate each player's requested states in one inference call."""
-        predictions = np.zeros((len(requests), LEDUC_ACTION_COUNT), dtype=np.float32)
-        information_set_ids = np.fromiter(
-            (request.information_set_id for request in requests),
-            dtype=np.int32,
-            count=len(requests),
-        )
+        action_count = self._network_config.output_size
+        predictions = np.zeros((len(requests), action_count), dtype=np.float32)
         for player in (0, 1):
             positions = np.fromiter(
                 (index for index, request in enumerate(requests) if request.player == player),
@@ -157,13 +241,14 @@ class DeepCFR(NaiveDeepCFR):
             network = self._advantage_networks[player]
             if network is None or len(positions) == 0:
                 continue
-            states = self._neural_data.states[information_set_ids[positions]]
+            states = np.stack([requests[int(position)].state for position in positions])
+            device = next(network.parameters()).device
             with torch.inference_mode():
-                output = network(torch.from_numpy(states))
+                output = network(torch.from_numpy(states).to(device=device, dtype=torch.float32))
             if not bool(torch.isfinite(output).all()):
                 raise FloatingPointError("predicted advantages must be finite")
-            predictions[positions] = output.numpy()
-        masks = self._neural_data.action_masks[information_set_ids]
+            predictions[positions] = output.cpu().numpy()
+        masks = np.stack([request.action_mask for request in requests])
         return _regret_match_batch(predictions, masks)
 
     def _traverse_batched(
@@ -199,7 +284,10 @@ class DeepCFR(NaiveDeepCFR):
 
         acting_player = int(tree.current_players[node_id])
         information_set_id = int(tree.information_set_ids[node_id])
-        strategy = yield _InferenceRequest(information_set_id, acting_player)
+        assert self._neural_data is not None
+        neural_state = self._neural_data.states[information_set_id]
+        action_mask = self._neural_data.action_masks[information_set_id]
+        strategy = yield _InferenceRequest(neural_state, action_mask, acting_player)
         if acting_player != traverser:
             self._packed_strategy_reservoir.add_values(
                 acting_player,
@@ -252,14 +340,108 @@ class DeepCFR(NaiveDeepCFR):
         )
         return node_value
 
+    def _traverse_holdem_batched(
+        self,
+        *,
+        state: HoldemState,
+        traverser: int,
+        iteration: int,
+        sampled_opponent_actions: dict[InformationState, int],
+        randomness: _TraversalRandomness,
+    ) -> _Traversal:
+        """Traverse one on-demand Hold'em trajectory with batched inference yields."""
+        if state.is_terminal:
+            return state.utility(traverser)
+        if state.is_chance_node:
+            outcomes = state.chance_outcomes()
+            outcome = outcomes[randomness.chance.randrange(len(outcomes))]
+            return (
+                yield from self._traverse_holdem_batched(
+                    state=state.apply_action(outcome.outcome),
+                    traverser=traverser,
+                    iteration=iteration,
+                    sampled_opponent_actions=sampled_opponent_actions,
+                    randomness=randomness,
+                )
+            )
+
+        acting_player = state.current_player
+        if acting_player is None:
+            raise RuntimeError("Hold'em player node has no acting player")
+        information_state = state.information_state()
+        neural_state = encode_holdem_information_state(information_state)
+        action_mask = holdem_action_mask(information_state.legal_actions)
+        strategy = yield _InferenceRequest(neural_state, action_mask, acting_player)
+
+        if acting_player != traverser:
+            self._packed_strategy_reservoir.add_values(
+                acting_player,
+                neural_state,
+                action_mask,
+                iteration,
+                strategy,
+            )
+            action_position = sampled_opponent_actions.get(information_state)
+            if action_position is None:
+                local_probabilities = np.asarray(
+                    [strategy[int(action)] for action in information_state.legal_actions],
+                    dtype=np.float64,
+                )
+                action_position = _sample_position(local_probabilities, randomness.policy)
+                sampled_opponent_actions[information_state] = action_position
+            action = information_state.legal_actions[action_position]
+            return (
+                yield from self._traverse_holdem_batched(
+                    state=state.apply_action(action),
+                    traverser=traverser,
+                    iteration=iteration,
+                    sampled_opponent_actions=sampled_opponent_actions,
+                    randomness=randomness,
+                )
+            )
+
+        action_values: list[float] = []
+        for action in information_state.legal_actions:
+            action_value = yield from self._traverse_holdem_batched(
+                state=state.apply_action(action),
+                traverser=traverser,
+                iteration=iteration,
+                sampled_opponent_actions=sampled_opponent_actions,
+                randomness=randomness,
+            )
+            action_values.append(action_value)
+        local_strategy = tuple(
+            float(strategy[int(action)]) for action in information_state.legal_actions
+        )
+        node_value = fsum(
+            probability * action_value
+            for probability, action_value in zip(local_strategy, action_values, strict=True)
+        )
+        advantages = np.zeros(len(ACTION_ORDER), dtype=np.float32)
+        for action, action_value in zip(
+            information_state.legal_actions,
+            action_values,
+            strict=True,
+        ):
+            advantages[int(action)] = action_value - node_value
+        self._packed_advantage_reservoirs[traverser].add_values(
+            neural_state,
+            action_mask,
+            iteration,
+            advantages,
+        )
+        return node_value
+
     def _predict_advantages(self, information_set_id: int, player: int) -> tuple[float, ...]:
         """Query one network for the inherited single-information-set interface."""
         network = self._advantage_networks[player]
         if network is None:
             return (0.0,) * LEDUC_ACTION_COUNT
+        assert self._neural_data is not None
         state = self._neural_data.states[[information_set_id]]
+        device = next(network.parameters()).device
         with torch.inference_mode():
-            prediction = network(torch.from_numpy(state))[0]
+            prediction = network(torch.from_numpy(state).to(device))[0]
         if not bool(torch.isfinite(prediction).all()):
             raise FloatingPointError("predicted advantages must be finite")
         return tuple(float(value) for value in prediction)
@@ -330,7 +512,7 @@ class DeepCFR(NaiveDeepCFR):
     def _train_packed_network(
         self,
         network: DeepCFRNetwork,
-        states: NDArray[np.float32],
+        states: NDArray[np.float16] | NDArray[np.float32],
         masks: NDArray[np.bool],
         sample_iterations: NDArray[np.uint32],
         targets: NDArray[np.float32],
@@ -349,7 +531,11 @@ class DeepCFR(NaiveDeepCFR):
             sample_iterations=torch.from_numpy(sample_iterations.astype(np.float32)),
             current_iteration=iteration,
             training_steps=training_steps,
-            batch_size=self.config.training_batch_size,
+            batch_size=(
+                self.config.strategy_batch_size
+                if strategy_targets
+                else self.config.advantage_batch_size
+            ),
             learning_rate=self.config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
@@ -382,8 +568,8 @@ def _regret_match_batch(
     """Apply Deep CFR regret matching to a batch with stable first-action ties."""
     if predicted_advantages.shape != action_masks.shape or predicted_advantages.ndim != 2:
         raise ValueError("predicted advantages and masks must have matching matrix shapes")
-    if predicted_advantages.shape[1] != LEDUC_ACTION_COUNT:
-        raise ValueError("action matrices have an incompatible action count")
+    if predicted_advantages.shape[1] < 1:
+        raise ValueError("action matrices must contain an action")
     if not np.all(np.isfinite(predicted_advantages)):
         raise FloatingPointError("predicted advantages must be finite")
     if not np.all(np.any(action_masks, axis=1)):

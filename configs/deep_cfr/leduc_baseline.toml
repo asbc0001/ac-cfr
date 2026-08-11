@@ -1,4 +1,4 @@
-format_version = 1
+format_version = 2
 
 [run]
 implementation = "optimised"
@@ -11,13 +11,15 @@ advantage_reservoir_capacity = 100000
 strategy_reservoir_capacity = 100000
 advantage_training_steps = 100
 strategy_training_steps = 200
-training_batch_size = 512
+advantage_batch_size = 512
+strategy_batch_size = 512
 learning_rate = 0.001
 validation_fraction = 0.1
 max_gradient_norm = 10.0
 dropout_probability = 0.0
 seed = 20260811
 snapshot_iterations = []
+game_configuration_id = "leduc"
 model_config_id = "leduc_deep_cfr"
 state_encoding_id = "leduc_neural"
 optimizer_id = "adam"

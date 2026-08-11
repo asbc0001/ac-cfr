@@ -1,10 +1,12 @@
 """Stable compatibility identifiers for tabular poker artefacts."""
 
 from dataclasses import fields
+from fractions import Fraction
 from hashlib import sha256
 
 import numpy as np
 
+from ac_cfr.games.holdem.engine import HoldemConfig
 from ac_cfr.games.tree import IndexedGameTree
 
 ACTION_SPACE_ID = "poker"
@@ -30,4 +32,23 @@ def tree_compatibility_digest(tree: IndexedGameTree) -> str:
         digest.update(canonical_array.dtype.str.encode("ascii"))
         digest.update(str(canonical_array.shape).encode("ascii"))
         digest.update(canonical_array.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def holdem_compatibility_digest(config: HoldemConfig) -> str:
+    """Hash every rule needed to interpret an on-demand Hold'em strategy."""
+    if not isinstance(config, HoldemConfig):
+        raise TypeError("config must be a HoldemConfig")
+    digest = sha256()
+    values = (
+        int(config.start_street),
+        config.max_bets_per_round,
+        Fraction(config.small_blind),
+        Fraction(config.big_blind),
+        Fraction(config.small_bet),
+        Fraction(config.big_bet),
+        config.button_player,
+        config.synthetic_flop_start,
+    )
+    digest.update(repr(values).encode("ascii"))
     return digest.hexdigest()

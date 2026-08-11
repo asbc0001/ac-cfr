@@ -1,4 +1,4 @@
-"""Checkpointed Deep CFR training and exact Leduc evaluation."""
+"""Checkpointed Deep CFR training with exact evaluation where tractable."""
 
 import json
 import re
@@ -13,8 +13,9 @@ from ac_cfr.common.config import DeepCFRImplementationId, GameConfigurationId
 from ac_cfr.common.provenance import code_revision
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId, UtilityUnit
+from ac_cfr.games.holdem.engine import HoldemConfig
 from ac_cfr.games.leduc import LeducConfig, LeducGame
-from ac_cfr.games.tree import compile_game_tree
+from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
 from ac_cfr.models import DeepCFRNetwork
 from ac_cfr.persistence.deep_cfr_checkpoints import (
     load_deep_cfr_checkpoint,
@@ -59,6 +60,11 @@ class DeepCFRRunConfig:
             raise TypeError("training must be a DeepCFRTrainingConfig")
         if not isinstance(self.runtime, DeepCFRRuntimeConfig):
             raise TypeError("runtime must be a DeepCFRRuntimeConfig")
+        if (
+            self.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE
+            and self.implementation is not DeepCFRImplementationId.OPTIMISED
+        ):
+            raise ValueError("modified HULHE requires the optimised Deep CFR implementation")
 
     def to_dict(self) -> dict[str, object]:
         """Return stable JSON-compatible run configuration values."""
@@ -116,8 +122,13 @@ def start_deep_cfr_training(
     if run_directory.exists():
         raise FileExistsError(f"run directory already exists: {run_directory}")
     _apply_runtime(config.runtime)
-    tree = compile_game_tree(LeducGame(), LeducConfig())
-    solver = deep_cfr_solver_type(config.implementation)(tree, config.training, config.runtime)
+    game = _game_context(config.training)
+    if isinstance(game, HoldemConfig):
+        from ac_cfr.solvers.deep_cfr import DeepCFR
+
+        solver = DeepCFR(game, config.training, config.runtime)
+    else:
+        solver = deep_cfr_solver_type(config.implementation)(game, config.training, config.runtime)
     revision = code_revision()
     _write_run_config(run_directory / "run_config.json", config, revision)
     return _execute_schedule(
@@ -140,8 +151,9 @@ def resume_deep_cfr_training(
     run_directory = checkpoint_path.parent.parent
     config = _load_run_config(run_directory / "run_config.json")
     _apply_runtime(config.runtime)
-    tree = compile_game_tree(LeducGame(), LeducConfig())
-    loaded = load_deep_cfr_checkpoint(checkpoint_path, tree, map_location=config.runtime.device)
+    game = _game_context(config.training)
+    # Reservoirs remain in host memory; reconstructed networks move to the configured device.
+    loaded = load_deep_cfr_checkpoint(checkpoint_path, game, map_location="cpu")
     if config.run_id != loaded.metadata["run_id"]:
         raise ValueError("checkpoint run_id does not match run_config.json")
     if config.training != loaded.solver.config:
@@ -204,7 +216,7 @@ def _execute_schedule(
             export_deep_cfr_snapshot(
                 snapshot_path,
                 network=network,
-                tree=solver.tree,
+                game=_solver_game_context(solver),
                 config=config.training,
                 implementation=config.implementation,
                 snapshot_id=snapshot_id,
@@ -271,7 +283,12 @@ def _record_evaluation(
     """Record exact strategy quality and the matching network losses."""
     if not isinstance(network, DeepCFRNetwork):
         raise TypeError("network must be a DeepCFRNetwork")
-    metrics = evaluate_strategy(solver.tree, deep_cfr_policy(solver.tree, network))
+    holdem_configuration = getattr(solver, "holdem_configuration", None)
+    metrics = (
+        None
+        if isinstance(holdem_configuration, HoldemConfig)
+        else evaluate_strategy(solver.tree, deep_cfr_policy(solver.tree, network))
+    )
     player_metrics = tuple(
         _network_metric(solver.training_metrics, solver.iteration, "advantage", player)
         for player in (0, 1)
@@ -285,8 +302,8 @@ def _record_evaluation(
     traversals = 2 * solver.config.traversals_per_player * solver.iteration
     result_store.upsert(
         {
-            "game": GameId.LEDUC.value,
-            "game_version": GameConfigurationId.LEDUC.value,
+            "game": (GameId.HOLD_EM.value if metrics is None else GameId.LEDUC.value),
+            "game_version": solver.config.game_configuration_id.value,
             "utility_unit": UtilityUnit.CHIP.value,
             "solver": deep_cfr_implementation(solver).value,
             "run_id": run_id,
@@ -295,9 +312,9 @@ def _record_evaluation(
             "iteration": solver.iteration,
             "seed": solver.config.seed,
             "elapsed_training_seconds": elapsed_training_seconds,
-            "expected_value_player_zero": metrics.expected_values[0],
-            "exploitability": metrics.exploitability,
-            "nash_conv": metrics.nash_conv,
+            "expected_value_player_zero": None if metrics is None else metrics.expected_values[0],
+            "exploitability": None if metrics is None else metrics.exploitability,
+            "nash_conv": None if metrics is None else metrics.nash_conv,
             "traversals": traversals,
             "traversals_per_second": traversals / elapsed_training_seconds,
             "player_zero_advantage_training_loss": player_metrics[0].training_loss,
@@ -384,6 +401,23 @@ def _write_run_config(path: Path, config: DeepCFRRunConfig, revision: str) -> No
 def _apply_runtime(config: DeepCFRRuntimeConfig) -> None:
     """Apply the resolved CPU execution setting before constructing networks."""
     torch.set_num_threads(config.cpu_threads)
+    if config.device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("configured CUDA device is unavailable")
+
+
+def _game_context(config: DeepCFRTrainingConfig) -> IndexedGameTree | HoldemConfig:
+    """Construct the game representation selected by immutable training metadata."""
+    if config.game_configuration_id is GameConfigurationId.LEDUC:
+        return compile_game_tree(LeducGame(), LeducConfig())
+    if config.game_configuration_id is GameConfigurationId.MODIFIED_HULHE:
+        return HoldemConfig.modified()
+    raise ValueError("Deep CFR game configuration is unsupported")
+
+
+def _solver_game_context(solver: NaiveDeepCFR) -> IndexedGameTree | HoldemConfig:
+    """Return the exact compatibility context used by a live solver."""
+    holdem_configuration = getattr(solver, "holdem_configuration", None)
+    return holdem_configuration if isinstance(holdem_configuration, HoldemConfig) else solver.tree
 
 
 def _load_run_config(path: Path) -> DeepCFRRunConfig:
@@ -404,19 +438,25 @@ def _write_summary(outcome: DeepCFRTrainingOutcome, store: DeepCFRMetricStore) -
     if not store.records:
         return
     record = max(store.records, key=lambda value: int(value["iteration"]))
-    lines = (
+    common_lines = (
         f"Run: {record['run_id']}",
-        "Game: Leduc",
+        f"Game: {record['game_version']}",
         f"Solver: Deep CFR ({record['solver']})",
         f"Iterations: {int(record['iteration']):,}",
         f"Traversals: {int(record['traversals']):,}",
-        f"Player 0 average-policy value: {float(record['expected_value_player_zero']):.12g} chips",
-        f"Exact exploitability: {float(record['exploitability']):.12g} chips",
-        f"NashConv: {float(record['nash_conv']):.12g} chips",
         f"Solver training time: {float(record['elapsed_training_seconds']):.6g} seconds",
         f"Final checkpoint: {outcome.latest_checkpoint.relative_to(outcome.run_directory)}",
         f"Final strategy snapshot: strategy_snapshots/{record['strategy_snapshot_id']}.pt",
     )
+    lines = common_lines
+    if record["exploitability"]:
+        exact_lines = (
+            "Player 0 average-policy value: "
+            f"{float(record['expected_value_player_zero']):.12g} chips",
+            f"Exact exploitability: {float(record['exploitability']):.12g} chips",
+            f"NashConv: {float(record['nash_conv']):.12g} chips",
+        )
+        lines = (*common_lines[:5], *exact_lines, *common_lines[5:])
     with atomic_text_writer(outcome.run_directory / "summary.txt") as summary_file:
         summary_file.write("\n".join(lines))
         summary_file.write("\n")

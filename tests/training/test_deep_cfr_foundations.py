@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from ac_cfr.benchmarking.deep_cfr_sensitivity import deep_cfr_sensitivity_cases
-from ac_cfr.common.config import DeepCFRImplementationId, ModelConfigId, StateEncodingId
+from ac_cfr.common.config import (
+    DeepCFRImplementationId,
+    GameConfigurationId,
+    ModelConfigId,
+    StateEncodingId,
+)
 from ac_cfr.games.leduc_neural import LEDUC_NEURAL_STATE_SIZE
 from ac_cfr.training.config import DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_config import load_deep_cfr_run_config
@@ -25,7 +30,8 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
         strategy_reservoir_capacity=10_000,
         advantage_training_steps=4,
         strategy_training_steps=8,
-        training_batch_size=128,
+        advantage_batch_size=128,
+        strategy_batch_size=128,
         learning_rate=1e-3,
         validation_fraction=0.1,
         max_gradient_norm=10.0,
@@ -67,7 +73,8 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Pa
     assert config.training.iterations == 12
     assert config.training.snapshot_iterations == (2, 12)
     assert config.training.model_config_id is ModelConfigId.LEDUC_DEEP_CFR_SMALL
-    assert config.training.training_batch_size == 512
+    assert config.training.advantage_batch_size == 512
+    assert config.training.strategy_batch_size == 512
     assert config.runtime.inference_batch_size == 256
     assert config.runtime.cpu_threads == 1
     assert config.to_dict()["runtime"] == {
@@ -90,6 +97,20 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Pa
     )
     with pytest.raises(ValueError, match="runtime configuration fields"):
         load_deep_cfr_run_config(invalid_preset, run_id="invalid_preset")
+
+    holdem = load_deep_cfr_run_config(
+        preset.parents[0] / "modified_hulhe_calibration.toml",
+        run_id="modified_hulhe_calibration",
+    )
+    assert holdem.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE
+    assert holdem.training.traversals_per_player == 10_000
+    assert holdem.training.advantage_training_steps == 16_000
+    assert holdem.training.strategy_training_steps == 16_000
+    assert holdem.training.advantage_batch_size == 10_000
+    assert holdem.training.strategy_batch_size == 10_000
+    assert holdem.training.advantage_reservoir_capacity == 10_000_000
+    assert holdem.training.strategy_reservoir_capacity == 10_000_000
+    assert holdem.runtime.device == "cuda"
 
 
 def test_deep_cfr_sensitivity_cases_change_one_declared_factor() -> None:

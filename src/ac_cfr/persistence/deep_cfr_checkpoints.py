@@ -7,15 +7,22 @@ from math import isfinite
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
+from numpy.typing import NDArray
 from torch import Tensor
 
 from ac_cfr.common.config import DeepCFRImplementationId, GameConfigurationId
 from ac_cfr.games.base import GameId
+from ac_cfr.games.holdem.engine import HoldemConfig
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, LEDUC_NEURAL_STATE_SIZE
 from ac_cfr.games.tree import IndexedGameTree
 from ac_cfr.models import DeepCFRNetwork, build_deep_cfr_network, deep_cfr_network_config
-from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, tree_compatibility_digest
+from ac_cfr.persistence.compatibility import (
+    ACTION_SPACE_ID,
+    holdem_compatibility_digest,
+    tree_compatibility_digest,
+)
 from ac_cfr.persistence.files import atomic_binary_writer
 from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
@@ -23,10 +30,13 @@ from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import (
     DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
     AdvantageSample,
+    PackedAdvantageReservoir,
+    PackedStrategyReservoir,
     StrategySample,
+    UniformReservoir,
 )
 
-DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 3
+DEEP_CFR_CHECKPOINT_SCHEMA_VERSION = 4
 PROJECT_VERSION = version("ac-cfr")
 _RNG_CONTRACT = "python_random_and_derived_torch_v1"
 
@@ -72,6 +82,7 @@ def save_deep_cfr_checkpoint(
         raise TypeError("metric_records must be a tuple of dictionaries")
 
     config = solver.config
+    game, game_version, compatibility_digest = _solver_game_metadata(solver)
     architecture = deep_cfr_network_config(
         config.model_config_id,
         dropout_probability=config.dropout_probability,
@@ -82,11 +93,11 @@ def save_deep_cfr_checkpoint(
         "checkpoint_schema_version": DEEP_CFR_CHECKPOINT_SCHEMA_VERSION,
         "project_version": PROJECT_VERSION,
         "code_revision": code_revision,
-        "game": GameId.LEDUC.value,
-        "game_version": GameConfigurationId.LEDUC.value,
+        "game": game,
+        "game_version": game_version,
         "state_encoding": config.state_encoding_id.value,
         "action_space": ACTION_SPACE_ID,
-        "tree_digest": tree_compatibility_digest(solver.tree),
+        "tree_digest": compatibility_digest,
         "solver": implementation.value,
         "model_config_id": config.model_config_id.value,
         "optimizer_id": config.optimizer_id.value,
@@ -119,13 +130,13 @@ def save_deep_cfr_checkpoint(
         "final_strategy_network": _network_state(solver.final_strategy_network),
         "optimizer_states": {},
         "advantage_reservoirs": [
-            _pack_advantage_reservoir(reservoir.capacity, reservoir.samples_seen, reservoir.samples)
+            _pack_advantage_storage(reservoir, architecture.input_size, architecture.output_size)
             for reservoir in solver.advantage_reservoirs
         ],
-        "strategy_reservoir": _pack_strategy_reservoir(
-            solver.strategy_reservoir.capacity,
-            solver.strategy_reservoir.samples_seen,
-            solver.strategy_reservoir.samples,
+        "strategy_reservoir": _pack_strategy_storage(
+            solver.strategy_reservoir,
+            architecture.input_size,
+            architecture.output_size,
         ),
         "rng_state": solver.training_rng_state(),
         "training_metrics": metrics,
@@ -140,13 +151,12 @@ def save_deep_cfr_checkpoint(
 
 def load_deep_cfr_checkpoint(
     path: Path,
-    tree: IndexedGameTree,
+    game: IndexedGameTree | HoldemConfig,
     *,
     map_location: str | torch.device = "cpu",
 ) -> LoadedDeepCFRCheckpoint:
     """Safely load, validate, and reconstruct the recorded Deep CFR implementation."""
-    if not isinstance(tree, IndexedGameTree):
-        raise TypeError("tree must be an IndexedGameTree")
+    _game_metadata(game)
     try:
         payload = torch.load(
             path,
@@ -169,14 +179,15 @@ def load_deep_cfr_checkpoint(
     }:
         raise ValueError("Deep CFR checkpoint fields are incomplete or unexpected")
 
-    metadata = _validated_metadata(payload["metadata"], tree)
+    metadata = _validated_metadata(payload["metadata"], game)
     implementation = DeepCFRImplementationId(metadata["solver"])
     config = DeepCFRTrainingConfig.from_dict(metadata["training_config"])
     runtime = DeepCFRRuntimeConfig.from_dict(metadata["runtime_config"])
-    expected_architecture = deep_cfr_network_config(
+    architecture = deep_cfr_network_config(
         config.model_config_id,
         dropout_probability=config.dropout_probability,
-    ).to_dict()
+    )
+    expected_architecture = architecture.to_dict()
     if metadata["architecture_config"] != expected_architecture:
         raise ValueError("Deep CFR checkpoint architecture is incompatible")
     if payload["optimizer_states"] != {} or metadata["optimizer_state_required"] is not False:
@@ -194,27 +205,60 @@ def load_deep_cfr_checkpoint(
         frozen=True,
         name="final strategy network",
     )
-    advantage_reservoirs = _load_advantage_reservoirs(
-        payload["advantage_reservoirs"], config, iteration
-    )
-    strategy_reservoir = _unpack_strategy_reservoir(
-        payload["strategy_reservoir"], config.strategy_reservoir_capacity, iteration
-    )
+    for network in (
+        *advantage_networks,
+        *snapshot_networks.values(),
+        final_strategy_network,
+    ):
+        if network is not None:
+            network.to(runtime.device)
     rng_state = _validated_rng_state(payload["rng_state"])
 
-    solver = deep_cfr_solver_type(implementation)(tree, config, runtime)
-    for player, samples in enumerate(advantage_reservoirs):
-        reservoir_state = payload["advantage_reservoirs"][player]
-        solver.advantage_reservoirs[player].restore_training_state(
-            samples=samples,
-            samples_seen=reservoir_state["samples_seen"],
-            rng_state=rng_state[f"advantage_reservoir_{player}"],
+    if isinstance(game, HoldemConfig) and implementation is not DeepCFRImplementationId.OPTIMISED:
+        raise ValueError("modified HULHE checkpoints require the optimised implementation")
+    if isinstance(game, HoldemConfig):
+        from ac_cfr.solvers.deep_cfr import DeepCFR
+
+        solver = DeepCFR(game, config, runtime)
+    else:
+        solver = deep_cfr_solver_type(implementation)(game, config, runtime)
+    if metadata["checkpoint_schema_version"] >= 4 and isinstance(
+        solver.advantage_reservoirs[0], PackedAdvantageReservoir
+    ):
+        _restore_packed_reservoirs(
+            solver,
+            payload["advantage_reservoirs"],
+            payload["strategy_reservoir"],
+            iteration,
+            rng_state,
         )
-    solver.strategy_reservoir.restore_training_state(
-        samples=strategy_reservoir,
-        samples_seen=payload["strategy_reservoir"]["samples_seen"],
-        rng_state=rng_state["strategy_reservoir"],
-    )
+    else:
+        advantage_reservoirs = _load_advantage_reservoirs(
+            payload["advantage_reservoirs"],
+            config,
+            iteration,
+            architecture.input_size,
+            architecture.output_size,
+        )
+        strategy_reservoir = _unpack_strategy_reservoir(
+            payload["strategy_reservoir"],
+            config.strategy_reservoir_capacity,
+            iteration,
+            architecture.input_size,
+            architecture.output_size,
+        )
+        for player, samples in enumerate(advantage_reservoirs):
+            reservoir_state = payload["advantage_reservoirs"][player]
+            solver.advantage_reservoirs[player].restore_training_state(
+                samples=samples,
+                samples_seen=reservoir_state["samples_seen"],
+                rng_state=rng_state[f"advantage_reservoir_{player}"],
+            )
+        solver.strategy_reservoir.restore_training_state(
+            samples=strategy_reservoir,
+            samples_seen=payload["strategy_reservoir"]["samples_seen"],
+            rng_state=rng_state["strategy_reservoir"],
+        )
     solver.restore_training_state(
         iteration=iteration,
         advantage_networks=advantage_networks,
@@ -231,7 +275,10 @@ def load_deep_cfr_checkpoint(
     )
 
 
-def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
+def _validated_metadata(
+    value: object,
+    game_context: IndexedGameTree | HoldemConfig,
+) -> dict[str, Any]:
     """Validate identifiers and metadata before constructing mutable solver state."""
     required_fields = {
         "checkpoint_schema_version",
@@ -260,16 +307,18 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != required_fields:
         raise ValueError("Deep CFR checkpoint metadata is incomplete or unexpected")
     metadata = value.copy()
+    game, game_version, compatibility_digest = _game_metadata(game_context)
     expected = {
-        "checkpoint_schema_version": DEEP_CFR_CHECKPOINT_SCHEMA_VERSION,
         "project_version": PROJECT_VERSION,
-        "game": GameId.LEDUC.value,
-        "game_version": GameConfigurationId.LEDUC.value,
+        "game": game,
+        "game_version": game_version,
         "action_space": ACTION_SPACE_ID,
-        "tree_digest": tree_compatibility_digest(tree),
+        "tree_digest": compatibility_digest,
         "reservoir_schema_version": DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
         "rng_contract": _RNG_CONTRACT,
     }
+    if metadata["checkpoint_schema_version"] not in (3, DEEP_CFR_CHECKPOINT_SCHEMA_VERSION):
+        raise ValueError("Deep CFR checkpoint has incompatible checkpoint_schema_version")
     for field_name, expected_value in expected.items():
         if metadata[field_name] != expected_value:
             raise ValueError(f"Deep CFR checkpoint has incompatible {field_name}")
@@ -288,6 +337,7 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
     if iteration > config.iterations:
         raise ValueError("Deep CFR checkpoint iteration exceeds its training budget")
     config_identifiers = {
+        "game_version": config.game_configuration_id.value,
         "state_encoding": config.state_encoding_id.value,
         "model_config_id": config.model_config_id.value,
         "optimizer_id": config.optimizer_id.value,
@@ -306,6 +356,36 @@ def _validated_metadata(value: object, tree: IndexedGameTree) -> dict[str, Any]:
     if metadata["schedule_state"] != expected_schedule:
         raise ValueError("Deep CFR checkpoint schedule state is incompatible")
     return metadata
+
+
+def _solver_game_metadata(solver: NaiveDeepCFR) -> tuple[str, str, str]:
+    holdem_configuration = getattr(solver, "holdem_configuration", None)
+    if isinstance(holdem_configuration, HoldemConfig):
+        game, game_version, digest = _game_metadata(holdem_configuration)
+        return game, game_version, digest
+    return _game_metadata(solver.tree)
+
+
+def _game_metadata(
+    game: IndexedGameTree | HoldemConfig,
+) -> tuple[str, str, str]:
+    if isinstance(game, IndexedGameTree):
+        if game.game_id is not GameId.LEDUC:
+            raise ValueError("indexed Deep CFR checkpoints require Leduc")
+        return (
+            GameId.LEDUC.value,
+            GameConfigurationId.LEDUC.value,
+            tree_compatibility_digest(game),
+        )
+    if isinstance(game, HoldemConfig):
+        if game.configuration_id is not GameConfigurationId.MODIFIED_HULHE:
+            raise ValueError("Hold'em Deep CFR checkpoints require modified HULHE")
+        return (
+            GameId.HOLD_EM.value,
+            GameConfigurationId.MODIFIED_HULHE.value,
+            holdem_compatibility_digest(game),
+        )
+    raise TypeError("game must be an IndexedGameTree or HoldemConfig")
 
 
 def _network_state(network: DeepCFRNetwork | None) -> dict[str, Tensor] | None:
@@ -389,16 +469,43 @@ def _pack_advantage_reservoir(
     capacity: int,
     samples_seen: int,
     samples: tuple[AdvantageSample, ...],
+    state_size: int,
+    action_count: int,
 ) -> dict[str, object]:
     return {
         "capacity": capacity,
         "samples_seen": samples_seen,
-        "states": _states_tensor(samples),
-        "action_masks": _masks_tensor(samples),
+        "states": _states_tensor(samples, state_size),
+        "action_masks": _masks_tensor(samples, action_count),
         "iterations": torch.tensor([sample.iteration for sample in samples], dtype=torch.int64),
         "advantages": _action_values_tensor(
-            [sample.advantages for sample in samples], len(samples)
+            [sample.advantages for sample in samples], len(samples), action_count
         ),
+    }
+
+
+def _pack_advantage_storage(
+    reservoir: UniformReservoir[AdvantageSample] | PackedAdvantageReservoir,
+    state_size: int,
+    action_count: int,
+) -> dict[str, object]:
+    """Pack a reservoir directly when contiguous arrays are available."""
+    if not isinstance(reservoir, PackedAdvantageReservoir):
+        return _pack_advantage_reservoir(
+            reservoir.capacity,
+            reservoir.samples_seen,
+            reservoir.samples,
+            state_size,
+            action_count,
+        )
+    states, action_masks, iterations, advantages = reservoir.arrays
+    return {
+        "capacity": reservoir.capacity,
+        "samples_seen": reservoir.samples_seen,
+        "states": torch.from_numpy(states),
+        "action_masks": torch.from_numpy(action_masks),
+        "iterations": torch.from_numpy(iterations.astype("int64")),
+        "advantages": torch.from_numpy(advantages),
     }
 
 
@@ -406,66 +513,214 @@ def _pack_strategy_reservoir(
     capacity: int,
     samples_seen: int,
     samples: tuple[StrategySample, ...],
+    state_size: int,
+    action_count: int,
 ) -> dict[str, object]:
     return {
         "capacity": capacity,
         "samples_seen": samples_seen,
         "players": torch.tensor([sample.player for sample in samples], dtype=torch.int8),
-        "states": _states_tensor(samples),
-        "action_masks": _masks_tensor(samples),
+        "states": _states_tensor(samples, state_size),
+        "action_masks": _masks_tensor(samples, action_count),
         "iterations": torch.tensor([sample.iteration for sample in samples], dtype=torch.int64),
-        "strategies": _action_values_tensor([sample.strategy for sample in samples], len(samples)),
+        "strategies": _action_values_tensor(
+            [sample.strategy for sample in samples], len(samples), action_count
+        ),
     }
 
 
-def _states_tensor(samples: tuple[AdvantageSample, ...] | tuple[StrategySample, ...]) -> Tensor:
+def _pack_strategy_storage(
+    reservoir: UniformReservoir[StrategySample] | PackedStrategyReservoir,
+    state_size: int,
+    action_count: int,
+) -> dict[str, object]:
+    """Pack a strategy reservoir without constructing millions of objects."""
+    if not isinstance(reservoir, PackedStrategyReservoir):
+        return _pack_strategy_reservoir(
+            reservoir.capacity,
+            reservoir.samples_seen,
+            reservoir.samples,
+            state_size,
+            action_count,
+        )
+    players, states, action_masks, iterations, strategies = reservoir.arrays
+    return {
+        "capacity": reservoir.capacity,
+        "samples_seen": reservoir.samples_seen,
+        "players": torch.from_numpy(players),
+        "states": torch.from_numpy(states),
+        "action_masks": torch.from_numpy(action_masks),
+        "iterations": torch.from_numpy(iterations.astype("int64")),
+        "strategies": torch.from_numpy(strategies),
+    }
+
+
+def _states_tensor(
+    samples: tuple[AdvantageSample, ...] | tuple[StrategySample, ...],
+    state_size: int,
+) -> Tensor:
     if not samples:
-        return torch.empty((0, LEDUC_NEURAL_STATE_SIZE), dtype=torch.float32)
+        return torch.empty((0, state_size), dtype=torch.float32)
     return torch.tensor([sample.state for sample in samples], dtype=torch.float32)
 
 
-def _masks_tensor(samples: tuple[AdvantageSample, ...] | tuple[StrategySample, ...]) -> Tensor:
+def _masks_tensor(
+    samples: tuple[AdvantageSample, ...] | tuple[StrategySample, ...],
+    action_count: int,
+) -> Tensor:
     if not samples:
-        return torch.empty((0, LEDUC_ACTION_COUNT), dtype=torch.bool)
+        return torch.empty((0, action_count), dtype=torch.bool)
     return torch.tensor([sample.action_mask for sample in samples], dtype=torch.bool)
 
 
-def _action_values_tensor(values: list[tuple[float, ...]], sample_count: int) -> Tensor:
+def _action_values_tensor(
+    values: list[tuple[float, ...]],
+    sample_count: int,
+    action_count: int,
+) -> Tensor:
     if not values:
-        return torch.empty((0, LEDUC_ACTION_COUNT), dtype=torch.float64)
-    return torch.tensor(values, dtype=torch.float64).reshape(sample_count, LEDUC_ACTION_COUNT)
+        return torch.empty((0, action_count), dtype=torch.float64)
+    return torch.tensor(values, dtype=torch.float64).reshape(sample_count, action_count)
 
 
 def _load_advantage_reservoirs(
     value: object,
     config: DeepCFRTrainingConfig,
     checkpoint_iteration: int,
+    state_size: int,
+    action_count: int,
 ) -> tuple[tuple[AdvantageSample, ...], tuple[AdvantageSample, ...]]:
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError("Deep CFR checkpoint advantage reservoirs are invalid")
     return (
         _unpack_advantage_reservoir(
-            value[0], config.advantage_reservoir_capacity, checkpoint_iteration
+            value[0],
+            config.advantage_reservoir_capacity,
+            checkpoint_iteration,
+            state_size,
+            action_count,
         ),
         _unpack_advantage_reservoir(
-            value[1], config.advantage_reservoir_capacity, checkpoint_iteration
+            value[1],
+            config.advantage_reservoir_capacity,
+            checkpoint_iteration,
+            state_size,
+            action_count,
         ),
     )
+
+
+def _restore_packed_reservoirs(
+    solver: NaiveDeepCFR,
+    advantage_values: object,
+    strategy_value: object,
+    checkpoint_iteration: int,
+    rng_state: dict[str, object],
+) -> None:
+    """Restore contiguous optimiser memories without constructing sample objects."""
+    advantage_reservoirs = solver.advantage_reservoirs
+    strategy_reservoir = solver.strategy_reservoir
+    if not all(
+        isinstance(reservoir, PackedAdvantageReservoir) for reservoir in advantage_reservoirs
+    ) or not isinstance(strategy_reservoir, PackedStrategyReservoir):
+        raise TypeError("solver reservoirs are not packed")
+    if not isinstance(advantage_values, list) or len(advantage_values) != 2:
+        raise ValueError("Deep CFR checkpoint advantage reservoirs are invalid")
+
+    for player, reservoir in enumerate(advantage_reservoirs):
+        assert isinstance(reservoir, PackedAdvantageReservoir)
+        raw_reservoir = advantage_values[player]
+        if not isinstance(raw_reservoir, dict):
+            raise ValueError("Deep CFR checkpoint advantage reservoir is invalid")
+        state_dtype = _torch_dtype(reservoir.arrays[0].dtype)
+        tensors, sample_count = _validated_reservoir(
+            raw_reservoir,
+            reservoir.capacity,
+            ("states", "action_masks", "iterations", "advantages"),
+            state_size=reservoir.state_size,
+            action_count=reservoir.action_count,
+            state_dtype=state_dtype,
+        )
+        _validate_tensor(
+            tensors["advantages"],
+            (sample_count, reservoir.action_count),
+            torch.float32,
+            "advantages",
+        )
+        iterations = _packed_iterations(tensors["iterations"], checkpoint_iteration)
+        reservoir.restore_arrays(
+            states=tensors["states"].cpu().numpy(),
+            action_masks=tensors["action_masks"].cpu().numpy(),
+            iterations=iterations,
+            advantages=tensors["advantages"].cpu().numpy(),
+            samples_seen=raw_reservoir["samples_seen"],
+            rng_state=rng_state[f"advantage_reservoir_{player}"],
+        )
+
+    if not isinstance(strategy_value, dict):
+        raise ValueError("Deep CFR checkpoint strategy reservoir is invalid")
+    state_dtype = _torch_dtype(strategy_reservoir.arrays[1].dtype)
+    tensors, sample_count = _validated_reservoir(
+        strategy_value,
+        strategy_reservoir.capacity,
+        ("players", "states", "action_masks", "iterations", "strategies"),
+        state_size=strategy_reservoir.state_size,
+        action_count=strategy_reservoir.action_count,
+        state_dtype=state_dtype,
+    )
+    _validate_tensor(tensors["players"], (sample_count,), torch.int8, "players")
+    _validate_tensor(
+        tensors["strategies"],
+        (sample_count, strategy_reservoir.action_count),
+        torch.float32,
+        "strategies",
+    )
+    strategy_reservoir.restore_arrays(
+        players=tensors["players"].cpu().numpy(),
+        states=tensors["states"].cpu().numpy(),
+        action_masks=tensors["action_masks"].cpu().numpy(),
+        iterations=_packed_iterations(tensors["iterations"], checkpoint_iteration),
+        strategies=tensors["strategies"].cpu().numpy(),
+        samples_seen=strategy_value["samples_seen"],
+        rng_state=rng_state["strategy_reservoir"],
+    )
+
+
+def _packed_iterations(
+    values: Tensor,
+    checkpoint_iteration: int,
+) -> NDArray[np.uint32]:
+    _validate_tensor(values, (len(values),), torch.int64, "iterations")
+    if len(values) and (int(values.min()) < 1 or int(values.max()) > checkpoint_iteration):
+        raise ValueError("Deep CFR checkpoint reservoir contains invalid sample iterations")
+    return values.cpu().numpy().astype("uint32")
+
+
+def _torch_dtype(dtype: np.dtype[Any]) -> torch.dtype:
+    if dtype == np.dtype(np.float16):
+        return torch.float16
+    if dtype == np.dtype(np.float32):
+        return torch.float32
+    raise ValueError("packed state dtype is unsupported")
 
 
 def _unpack_advantage_reservoir(
     value: object,
     expected_capacity: int,
     checkpoint_iteration: int,
+    state_size: int,
+    action_count: int,
 ) -> tuple[AdvantageSample, ...]:
     tensors, sample_count = _validated_reservoir(
         value,
         expected_capacity,
         ("states", "action_masks", "iterations", "advantages"),
+        state_size=state_size,
+        action_count=action_count,
     )
     _validate_tensor(
         tensors["advantages"],
-        (sample_count, LEDUC_ACTION_COUNT),
+        (sample_count, action_count),
         torch.float64,
         "advantages",
     )
@@ -486,16 +741,20 @@ def _unpack_strategy_reservoir(
     value: object,
     expected_capacity: int,
     checkpoint_iteration: int,
+    state_size: int,
+    action_count: int,
 ) -> tuple[StrategySample, ...]:
     tensors, sample_count = _validated_reservoir(
         value,
         expected_capacity,
         ("players", "states", "action_masks", "iterations", "strategies"),
+        state_size=state_size,
+        action_count=action_count,
     )
     _validate_tensor(tensors["players"], (sample_count,), torch.int8, "players")
     _validate_tensor(
         tensors["strategies"],
-        (sample_count, LEDUC_ACTION_COUNT),
+        (sample_count, action_count),
         torch.float64,
         "strategies",
     )
@@ -517,6 +776,10 @@ def _validated_reservoir(
     value: object,
     expected_capacity: int,
     tensor_fields: tuple[str, ...],
+    *,
+    state_size: int = LEDUC_NEURAL_STATE_SIZE,
+    action_count: int = LEDUC_ACTION_COUNT,
+    state_dtype: torch.dtype = torch.float32,
 ) -> tuple[dict[str, Tensor], int]:
     expected_fields = {"capacity", "samples_seen", *tensor_fields}
     if not isinstance(value, dict) or set(value) != expected_fields:
@@ -537,13 +800,13 @@ def _validated_reservoir(
         raise ValueError("Deep CFR checkpoint reservoir occupancy is inconsistent")
     _validate_tensor(
         tensors["states"],
-        (sample_count, LEDUC_NEURAL_STATE_SIZE),
-        torch.float32,
+        (sample_count, state_size),
+        state_dtype,
         "states",
     )
     _validate_tensor(
         tensors["action_masks"],
-        (sample_count, LEDUC_ACTION_COUNT),
+        (sample_count, action_count),
         torch.bool,
         "action_masks",
     )

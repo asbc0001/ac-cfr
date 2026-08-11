@@ -4,12 +4,13 @@ import torch
 
 from ac_cfr.agents.base import PlayableAgent, Strategy, normalise_strategy
 from ac_cfr.games.base import Action, GameId, InformationState
+from ac_cfr.games.holdem.neural import encode_holdem_information_state
 from ac_cfr.games.leduc_neural import encode_leduc_information_state
 from ac_cfr.persistence.deep_cfr_snapshots import LoadedDeepCFRSnapshot
 
 
 class NeuralAgent(PlayableAgent):
-    """Query one frozen Leduc average-strategy network."""
+    """Query one compatible frozen Deep CFR average-strategy network."""
 
     __slots__ = ("_snapshot",)
 
@@ -26,14 +27,23 @@ class NeuralAgent(PlayableAgent):
         """Return masked network probabilities in legal-action order."""
         if not isinstance(information_state, InformationState):
             raise TypeError("information_state must be an InformationState")
-        if information_state.game_id is not GameId.LEDUC:
-            raise ValueError("information state must belong to Leduc")
+        try:
+            expected_game = GameId(self._snapshot.metadata.game)
+        except ValueError as error:
+            raise ValueError("snapshot game is unsupported") from error
+        if information_state.game_id is not expected_game:
+            raise ValueError("information state does not match the snapshot game")
         if legal_actions != information_state.legal_actions:
             raise ValueError("legal_actions must match the information state")
 
         network = self._snapshot.network
         device = next(network.parameters()).device
-        state = torch.from_numpy(encode_leduc_information_state(information_state).copy())
+        state_encoder = (
+            encode_leduc_information_state
+            if expected_game is GameId.LEDUC
+            else encode_holdem_information_state
+        )
+        state = torch.from_numpy(state_encoder(information_state).copy())
         action_indices = torch.tensor(
             [int(action) for action in legal_actions],
             dtype=torch.long,

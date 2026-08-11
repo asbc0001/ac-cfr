@@ -59,7 +59,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.strategy_reservoir_capacity,
                 arguments.advantage_training_steps,
                 arguments.strategy_training_steps,
-                arguments.training_batch_size,
+                arguments.advantage_batch_size,
+                arguments.strategy_batch_size,
                 arguments.inference_batch_size,
                 arguments.cpu_threads,
                 arguments.device,
@@ -81,8 +82,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.game is None or arguments.solver is None or arguments.iterations is None
         ):
             parser.error("new training requires --game, --solver, and --iterations")
-        if arguments.config is not None and arguments.game not in (None, "leduc"):
-            parser.error("Deep CFR configuration supports only --game leduc")
+        if arguments.config is not None and arguments.game not in (None, "leduc", "holdem"):
+            parser.error("Deep CFR configuration has an incompatible game")
         if arguments.config is not None and arguments.solver not in (None, DEEP_CFR_SOLVER_ID):
             parser.error("Deep CFR configuration is incompatible with the selected solver")
         try:
@@ -96,8 +97,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if is_deep_cfr:
             if arguments.config is None:
                 parser.error("new Deep CFR training requires --config")
-            if arguments.game not in (None, "leduc"):
-                parser.error("Deep CFR supports only --game leduc")
+            if arguments.game not in (None, "leduc", "holdem"):
+                parser.error("Deep CFR has an incompatible game")
             if any(
                 value is not None
                 for value in (
@@ -177,7 +178,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train a poker solver.")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--config", type=Path, help="Deep CFR TOML configuration preset.")
-    parser.add_argument("--game", choices=("kuhn", "leduc"))
+    parser.add_argument("--game", choices=("kuhn", "leduc", "holdem"))
     parser.add_argument("--solver", choices=(*SOLVER_IDS, DEEP_CFR_SOLVER_ID))
     parser.add_argument("--iterations", type=int)
     parser.add_argument("--seed", type=int)
@@ -210,12 +211,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Minibatch updates for each exported average-strategy network.",
     )
     parser.add_argument(
-        "--training-batch-size",
+        "--advantage-batch-size",
         type=int,
     )
+    parser.add_argument("--strategy-batch-size", type=int)
     parser.add_argument("--inference-batch-size", type=int)
     parser.add_argument("--cpu-threads", type=int)
-    parser.add_argument("--device", choices=("cpu",))
+    parser.add_argument("--device", choices=("cpu", "cuda"))
     parser.add_argument(
         "--model-config-id",
         choices=tuple(config_id.value for config_id in ModelConfigId),
@@ -288,11 +290,19 @@ def _deep_cfr_config(
         raise ValueError("new Deep CFR training requires --config")
     run_id = arguments.run_id or new_run_id()
     overrides = _deep_cfr_overrides(arguments, snapshots)
-    return load_deep_cfr_run_config(
+    config = load_deep_cfr_run_config(
         arguments.config,
         run_id=run_id,
         overrides=overrides,
     )
+    expected_game = (
+        "holdem"
+        if config.training.game_configuration_id.value == "modified_hulhe"
+        else config.training.game_configuration_id.value
+    )
+    if arguments.game is not None and arguments.game != expected_game:
+        raise ValueError("--game does not match the Deep CFR preset")
+    return config
 
 
 def _deep_cfr_overrides(
@@ -310,7 +320,8 @@ def _deep_cfr_overrides(
         "strategy_reservoir_capacity",
         "advantage_training_steps",
         "strategy_training_steps",
-        "training_batch_size",
+        "advantage_batch_size",
+        "strategy_batch_size",
         "inference_batch_size",
         "cpu_threads",
         "device",
@@ -338,7 +349,8 @@ def _reject_deep_cfr_options(
         "strategy_reservoir_capacity",
         "advantage_training_steps",
         "strategy_training_steps",
-        "training_batch_size",
+        "advantage_batch_size",
+        "strategy_batch_size",
         "inference_batch_size",
         "cpu_threads",
         "device",

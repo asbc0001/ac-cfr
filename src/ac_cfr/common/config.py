@@ -30,6 +30,7 @@ class ModelConfigId(StrEnum):
 
     LEDUC_DEEP_CFR_BASELINE = "leduc_deep_cfr"
     LEDUC_DEEP_CFR_SMALL = "leduc_deep_cfr_small"
+    MODIFIED_HULHE_DEEP_CFR = "modified_hulhe_deep_cfr"
 
     # Retain the original name for existing checkpoints and snapshots.
     LEDUC_DEEP_CFR = LEDUC_DEEP_CFR_BASELINE

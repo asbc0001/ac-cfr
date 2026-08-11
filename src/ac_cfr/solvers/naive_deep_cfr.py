@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from ac_cfr.common.config import GameConfigurationId
 from ac_cfr.common.rng import RngStream, SeedDeriver
 from ac_cfr.games.base import GameId, NodeType, validate_player
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, build_leduc_neural_data
@@ -128,6 +129,8 @@ class NaiveDeepCFR:
             raise ValueError("Deep CFR currently supports only Leduc")
         if not isinstance(config, DeepCFRTrainingConfig):
             raise TypeError("config must be a DeepCFRTrainingConfig")
+        if config.game_configuration_id is not GameConfigurationId.LEDUC:
+            raise ValueError("reference Deep CFR supports only Leduc")
         if not isinstance(runtime, DeepCFRRuntimeConfig):
             raise TypeError("runtime must be a DeepCFRRuntimeConfig")
 
@@ -443,7 +446,7 @@ class NaiveDeepCFR:
             samples=self._advantage_reservoirs[player].samples,
             current_iteration=iteration,
             training_steps=self._config.advantage_training_steps,
-            batch_size=self._config.training_batch_size,
+            batch_size=self._config.advantage_batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
@@ -473,7 +476,7 @@ class NaiveDeepCFR:
             samples=self._strategy_reservoir.samples,
             current_iteration=iteration,
             training_steps=self._config.strategy_training_steps,
-            batch_size=self._config.training_batch_size,
+            batch_size=self._config.strategy_batch_size,
             learning_rate=self._config.learning_rate,
             data_seed=self._seed(RngStream.DATA_LOADER, seed_index),
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
@@ -504,7 +507,7 @@ class NaiveDeepCFR:
             return build_deep_cfr_network(
                 self._config.model_config_id,
                 dropout_probability=self._config.dropout_probability,
-            )
+            ).to(self._runtime.device)
 
     def _seed(self, stream: RngStream, index: int) -> int:
         return SeedDeriver(self._config.seed).derive(stream, index)
@@ -521,8 +524,8 @@ def deep_cfr_regret_matching(
     action_mask: tuple[bool, ...],
 ) -> tuple[float, ...]:
     """Convert predicted advantages into a legal Deep CFR strategy."""
-    if len(predicted_advantages) != LEDUC_ACTION_COUNT or len(action_mask) != LEDUC_ACTION_COUNT:
-        raise ValueError(f"advantages and mask must contain {LEDUC_ACTION_COUNT} values")
+    if not predicted_advantages or len(predicted_advantages) != len(action_mask):
+        raise ValueError("advantages and mask must have the same non-zero length")
     if any(not isfinite(value) for value in predicted_advantages):
         raise ValueError("predicted advantages must be finite")
     legal_actions = [action for action, is_legal in enumerate(action_mask) if is_legal]
@@ -530,7 +533,7 @@ def deep_cfr_regret_matching(
         raise ValueError("action_mask must contain a legal action")
 
     positive_total = fsum(max(predicted_advantages[action], 0.0) for action in legal_actions)
-    strategy = [0.0] * LEDUC_ACTION_COUNT
+    strategy = [0.0] * len(action_mask)
     if positive_total > 0.0:
         for action in legal_actions:
             strategy[action] = max(predicted_advantages[action], 0.0) / positive_total
@@ -554,7 +557,7 @@ def linear_cfr_loss(
         raise ValueError("current_iteration must be positive")
     if predictions.shape != targets.shape or predictions.shape != action_masks.shape:
         raise ValueError("predictions, targets and action_masks must have matching shapes")
-    if predictions.ndim != 2 or predictions.shape[1] != LEDUC_ACTION_COUNT:
+    if predictions.ndim != 2 or predictions.shape[1] < 1:
         raise ValueError("action tensors have incompatible dimensions")
     if sample_iterations.shape != (predictions.shape[0],):
         raise ValueError("sample_iterations has an incompatible shape")
@@ -653,8 +656,16 @@ def _train_network_tensors(
     training_indices, validation_indices = _split_training_indices(
         len(states), validation_fraction, generator
     )
-    with torch.random.fork_rng(devices=[]):
+    network_device = next(network.parameters()).device
+    cuda_devices = (
+        [network_device.index if network_device.index is not None else torch.cuda.current_device()]
+        if network_device.type == "cuda"
+        else []
+    )
+    with torch.random.fork_rng(devices=cuda_devices):
         torch.manual_seed(training_seed)
+        if cuda_devices:
+            torch.cuda.manual_seed(training_seed)
         _fit_network(
             network=network,
             optimiser=optimiser,
@@ -722,6 +733,7 @@ def _fit_network(
 ) -> None:
     """Apply a fixed number of uniformly sampled minibatch updates."""
     _require_finite_parameters(network)
+    device = next(network.parameters()).device
     network.train()
     for _ in range(training_steps):
         positions = torch.randint(
@@ -731,11 +743,12 @@ def _fit_network(
         )
         indices = training_indices[positions]
         optimiser.zero_grad(set_to_none=True)
+        batch_states = states[indices].to(device=device, dtype=torch.float32)
         loss = linear_cfr_loss(
-            network(states[indices]),
-            targets[indices],
-            action_masks[indices],
-            sample_iterations[indices],
+            network(batch_states),
+            targets[indices].to(device),
+            action_masks[indices].to(device),
+            sample_iterations[indices].to(device),
             current_iteration,
             strategy_targets=strategy_targets,
         )
@@ -783,12 +796,13 @@ def _evaluate_network_loss(
     strategy_targets: bool,
 ) -> float:
     """Evaluate one fixed subset with dropout disabled and gradients omitted."""
+    device = next(network.parameters()).device
     with torch.inference_mode():
         loss = linear_cfr_loss(
-            network(states[indices]),
-            targets[indices],
-            action_masks[indices],
-            sample_iterations[indices],
+            network(states[indices].to(device=device, dtype=torch.float32)),
+            targets[indices].to(device),
+            action_masks[indices].to(device),
+            sample_iterations[indices].to(device),
             current_iteration,
             strategy_targets=strategy_targets,
         )

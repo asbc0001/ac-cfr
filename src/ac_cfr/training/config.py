@@ -3,13 +3,18 @@
 from dataclasses import asdict, dataclass
 from math import isfinite
 
-from ac_cfr.common.config import ModelConfigId, OptimizerId, StateEncodingId
+from ac_cfr.common.config import (
+    GameConfigurationId,
+    ModelConfigId,
+    OptimizerId,
+    StateEncodingId,
+)
 from ac_cfr.common.rng import SeedDeriver
 
 
 @dataclass(frozen=True, slots=True)
 class DeepCFRTrainingConfig:
-    """Algorithmic work and memory limits for one Leduc Deep CFR run."""
+    """Algorithmic work and memory limits for one Deep CFR run."""
 
     iterations: int
     traversals_per_player: int
@@ -17,13 +22,15 @@ class DeepCFRTrainingConfig:
     strategy_reservoir_capacity: int
     advantage_training_steps: int
     strategy_training_steps: int
-    training_batch_size: int
+    advantage_batch_size: int
+    strategy_batch_size: int
     learning_rate: float
     validation_fraction: float
     max_gradient_norm: float | None
     dropout_probability: float
     seed: int
     snapshot_iterations: tuple[int, ...] = ()
+    game_configuration_id: GameConfigurationId = GameConfigurationId.LEDUC
     model_config_id: ModelConfigId = ModelConfigId.LEDUC_DEEP_CFR
     state_encoding_id: StateEncodingId = StateEncodingId.LEDUC_NEURAL
     optimizer_id: OptimizerId = OptimizerId.ADAM
@@ -36,7 +43,8 @@ class DeepCFRTrainingConfig:
             "strategy_reservoir_capacity",
             "advantage_training_steps",
             "strategy_training_steps",
-            "training_batch_size",
+            "advantage_batch_size",
+            "strategy_batch_size",
         ):
             _validate_positive_integer(name, getattr(self, name))
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
@@ -65,13 +73,27 @@ class DeepCFRTrainingConfig:
             _validate_positive_integer("snapshot iteration", iteration)
             if iteration > self.iterations:
                 raise ValueError("snapshot iterations must not exceed the training budget")
-        if self.model_config_id not in {
-            ModelConfigId.LEDUC_DEEP_CFR_BASELINE,
-            ModelConfigId.LEDUC_DEEP_CFR_SMALL,
-        }:
-            raise ValueError("model_config_id must select the Leduc Deep CFR network")
-        if self.state_encoding_id is not StateEncodingId.LEDUC_NEURAL:
-            raise ValueError("state_encoding_id must select the Leduc neural encoding")
+        expected_identifiers = {
+            GameConfigurationId.LEDUC: (
+                {
+                    ModelConfigId.LEDUC_DEEP_CFR_BASELINE,
+                    ModelConfigId.LEDUC_DEEP_CFR_SMALL,
+                },
+                StateEncodingId.LEDUC_NEURAL,
+            ),
+            GameConfigurationId.MODIFIED_HULHE: (
+                {ModelConfigId.MODIFIED_HULHE_DEEP_CFR},
+                StateEncodingId.HOLD_EM,
+            ),
+        }
+        try:
+            model_ids, state_encoding_id = expected_identifiers[self.game_configuration_id]
+        except KeyError as error:
+            raise ValueError("game_configuration_id is unsupported by Deep CFR") from error
+        if self.model_config_id not in model_ids:
+            raise ValueError("model_config_id does not match the configured game")
+        if self.state_encoding_id is not state_encoding_id:
+            raise ValueError("state_encoding_id does not match the configured game")
         if self.optimizer_id is not OptimizerId.ADAM:
             raise ValueError("optimizer_id must select Adam")
 
@@ -79,6 +101,7 @@ class DeepCFRTrainingConfig:
         """Return stable configuration values suitable for checkpoint metadata."""
         values = asdict(self)
         values["snapshot_iterations"] = list(self.snapshot_iterations)
+        values["game_configuration_id"] = self.game_configuration_id.value
         values["model_config_id"] = self.model_config_id.value
         values["state_encoding_id"] = self.state_encoding_id.value
         values["optimizer_id"] = self.optimizer_id.value
@@ -87,7 +110,9 @@ class DeepCFRTrainingConfig:
     @classmethod
     def from_dict(cls, values: object) -> "DeepCFRTrainingConfig":
         """Reconstruct an exactly validated checkpointed configuration."""
-        if not isinstance(values, dict) or set(values) != {
+        if not isinstance(values, dict):
+            raise ValueError("Deep CFR training configuration fields are incompatible")
+        legacy_fields = {
             "iterations",
             "traversals_per_player",
             "advantage_reservoir_capacity",
@@ -104,14 +129,26 @@ class DeepCFRTrainingConfig:
             "model_config_id",
             "state_encoding_id",
             "optimizer_id",
-        }:
+        }
+        current_fields = legacy_fields - {"training_batch_size"} | {
+            "advantage_batch_size",
+            "strategy_batch_size",
+            "game_configuration_id",
+        }
+        if set(values) not in (legacy_fields, current_fields):
             raise ValueError("Deep CFR training configuration fields are incompatible")
         parsed = values.copy()
+        if set(values) == legacy_fields:
+            batch_size = parsed.pop("training_batch_size")
+            parsed["advantage_batch_size"] = batch_size
+            parsed["strategy_batch_size"] = batch_size
+            parsed["game_configuration_id"] = GameConfigurationId.LEDUC.value
         snapshots = parsed["snapshot_iterations"]
         if not isinstance(snapshots, list):
             raise ValueError("snapshot_iterations must be stored as a list")
         try:
             parsed["snapshot_iterations"] = tuple(snapshots)
+            parsed["game_configuration_id"] = GameConfigurationId(parsed["game_configuration_id"])
             parsed["model_config_id"] = ModelConfigId(parsed["model_config_id"])
             parsed["state_encoding_id"] = StateEncodingId(parsed["state_encoding_id"])
             parsed["optimizer_id"] = OptimizerId(parsed["optimizer_id"])
@@ -131,8 +168,8 @@ class DeepCFRRuntimeConfig:
     def __post_init__(self) -> None:
         _validate_positive_integer("inference_batch_size", self.inference_batch_size)
         _validate_positive_integer("cpu_threads", self.cpu_threads)
-        if self.device != "cpu":
-            raise ValueError("device must be 'cpu' for the current Leduc implementation")
+        if self.device not in {"cpu", "cuda"}:
+            raise ValueError("device must be 'cpu' or 'cuda'")
 
     def to_dict(self) -> dict[str, object]:
         """Return stable runtime values for the resolved run configuration."""

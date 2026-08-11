@@ -6,6 +6,11 @@ from math import isfinite
 from torch import Tensor, nn
 
 from ac_cfr.common.config import ModelConfigId
+from ac_cfr.games.holdem.neural import (
+    HOLD_EM_ACTION_COUNT,
+    HOLD_EM_NEURAL_INPUT_SCALING,
+    HOLD_EM_NEURAL_STATE_SIZE,
+)
 from ac_cfr.games.leduc_neural import (
     LEDUC_ACTION_COUNT,
     LEDUC_NEURAL_INPUT_SCALING,
@@ -76,9 +81,18 @@ LEDUC_DEEP_CFR_SMALL_NETWORK = DeepCFRNetworkConfig(
     input_scaling=LEDUC_NEURAL_INPUT_SCALING,
 )
 
+MODIFIED_HULHE_DEEP_CFR_NETWORK = DeepCFRNetworkConfig(
+    model_config_id=ModelConfigId.MODIFIED_HULHE_DEEP_CFR,
+    input_size=HOLD_EM_NEURAL_STATE_SIZE,
+    hidden_sizes=(512, 512, 512, 512, 512, 512, 512),
+    output_size=HOLD_EM_ACTION_COUNT,
+    input_scaling=HOLD_EM_NEURAL_INPUT_SCALING,
+)
+
 _NETWORK_CONFIGS = {
     ModelConfigId.LEDUC_DEEP_CFR_BASELINE: LEDUC_DEEP_CFR_NETWORK,
     ModelConfigId.LEDUC_DEEP_CFR_SMALL: LEDUC_DEEP_CFR_SMALL_NETWORK,
+    ModelConfigId.MODIFIED_HULHE_DEEP_CFR: MODIFIED_HULHE_DEEP_CFR_NETWORK,
 }
 
 

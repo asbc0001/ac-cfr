@@ -8,7 +8,7 @@ from ac_cfr.common.config import DeepCFRImplementationId
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
-_FORMAT_VERSION = 1
+_FORMAT_VERSION = 2
 _RUN_FIELDS = {"implementation", "checkpoint_interval"}
 _TRAINING_FIELDS = {
     "iterations",
@@ -17,17 +17,24 @@ _TRAINING_FIELDS = {
     "strategy_reservoir_capacity",
     "advantage_training_steps",
     "strategy_training_steps",
-    "training_batch_size",
+    "advantage_batch_size",
+    "strategy_batch_size",
     "learning_rate",
     "validation_fraction",
     "max_gradient_norm",
     "dropout_probability",
     "seed",
     "snapshot_iterations",
+    "game_configuration_id",
     "model_config_id",
     "state_encoding_id",
     "optimizer_id",
 }
+_LEGACY_TRAINING_FIELDS = _TRAINING_FIELDS - {
+    "advantage_batch_size",
+    "strategy_batch_size",
+    "game_configuration_id",
+} | {"training_batch_size"}
 _RUNTIME_FIELDS = {"inference_batch_size", "cpu_threads", "device"}
 
 
@@ -44,11 +51,20 @@ def load_deep_cfr_run_config(
         raise ValueError(f"Deep CFR configuration is unreadable: {path}") from error
     if set(values) != {"format_version", "run", "training", "runtime"}:
         raise ValueError("Deep CFR configuration sections are incompatible")
-    if values["format_version"] != _FORMAT_VERSION:
+    format_version = values["format_version"]
+    if isinstance(format_version, bool) or not isinstance(format_version, int):
+        raise ValueError("Deep CFR configuration format_version is incompatible")
+    if format_version not in (1, _FORMAT_VERSION):
         raise ValueError("Deep CFR configuration format_version is incompatible")
 
     run = _strict_table(values["run"], _RUN_FIELDS, "run")
-    training = _strict_table(values["training"], _TRAINING_FIELDS, "training")
+    training_fields = _LEGACY_TRAINING_FIELDS if format_version == 1 else _TRAINING_FIELDS
+    training = _strict_table(values["training"], training_fields, "training")
+    if format_version == 1:
+        batch_size = training.pop("training_batch_size")
+        training["advantage_batch_size"] = batch_size
+        training["strategy_batch_size"] = batch_size
+        training["game_configuration_id"] = "leduc"
     runtime = _strict_table(values["runtime"], _RUNTIME_FIELDS, "runtime")
     _apply_overrides(run, training, runtime, overrides or {})
     try:
