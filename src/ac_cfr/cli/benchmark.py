@@ -12,9 +12,6 @@ from ac_cfr.benchmarking.deep_cfr_reference_validation import (
 )
 from ac_cfr.benchmarking.harness import run_tabular_benchmark
 from ac_cfr.benchmarking.mccfr_gate import run_mccfr_gate
-from ac_cfr.benchmarking.mccfr_reference_validation import (
-    run_mccfr_reference_convergence_validation,
-)
 from ac_cfr.benchmarking.mccfr_validation import run_mccfr_validation
 from ac_cfr.training.runner import SOLVER_IDS
 
@@ -26,7 +23,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--suite",
         choices=(
             "cfr-cfr-plus",
-            "mccfr-reference-convergence",
             "mccfr-validation",
             "mccfr-gate",
             "deep-cfr-reference",
@@ -55,13 +51,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_directory = arguments.output or Path("results") / BENCHMARK_ID
             result_path = run_cfr_gate(output_directory, progress_callback=print)
             result_label = "gate"
-        elif arguments.suite == "mccfr-reference-convergence":
-            output_directory = arguments.output or Path("results/mccfr_reference_convergence")
-            result_path = run_mccfr_reference_convergence_validation(
-                output_directory,
-                progress_callback=print,
-            )
-            result_label = "validation"
         elif arguments.suite == "mccfr-validation":
             output_directory = arguments.output or Path("results/mccfr")
             result_path = run_mccfr_validation(

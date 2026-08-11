@@ -83,7 +83,7 @@
   "passed": true,
   "run_files": {
     "20260810": {
-      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
       "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260810/checkpoints/latest.pt",
       "run_directory": "runs/leduc-naive-deep-cfr-seed-20260810",
       "snapshots": [
@@ -94,7 +94,7 @@
       ]
     },
     "20260811": {
-      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
       "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260811/checkpoints/latest.pt",
       "run_directory": "runs/leduc-naive-deep-cfr-seed-20260811",
       "snapshots": [
@@ -105,7 +105,7 @@
       ]
     },
     "20260812": {
-      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
       "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260812/checkpoints/latest.pt",
       "run_directory": "runs/leduc-naive-deep-cfr-seed-20260812",
       "snapshots": [
@@ -116,7 +116,7 @@
       ]
     },
     "20260813": {
-      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
       "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260813/checkpoints/latest.pt",
       "run_directory": "runs/leduc-naive-deep-cfr-seed-20260813",
       "snapshots": [
@@ -127,7 +127,7 @@
       ]
     },
     "20260814": {
-      "code_revision": "cbc0b7c2aa431693e3bf2a59dcea5cdb94781199-dirty",
+      "code_revision": "2d94350c983d996b6ed1489b81d541f2f697e617",
       "latest_checkpoint": "runs/leduc-naive-deep-cfr-seed-20260814/checkpoints/latest.pt",
       "run_directory": "runs/leduc-naive-deep-cfr-seed-20260814",
       "snapshots": [

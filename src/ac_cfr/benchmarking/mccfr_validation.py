@@ -4,6 +4,7 @@ import csv
 import json
 import subprocess
 from collections.abc import Callable
+from itertools import pairwise
 from pathlib import Path
 from statistics import median
 from time import perf_counter
@@ -47,12 +48,12 @@ OPTIMISED_MILESTONES: Final = (
     20_000_000,
 )
 FINAL_EXPLOITABILITY_LIMIT = 0.005
+REFERENCE_FINAL_MEDIAN_EXPLOITABILITY_LIMIT = 10 * FINAL_EXPLOITABILITY_LIMIT
 SELF_PLAY_DUPLICATE_PAIRS = 20_000
 SELF_PLAY_SEED = 20260815
 EQUIVALENCE_ITERATIONS = 10
 EQUIVALENCE_ABSOLUTE_TOLERANCE = 1e-12
 
-_REFERENCE_DIRECTORY = Path("results/mccfr_reference_convergence")
 _TABULAR_REFERENCE_PATH = Path("results/tabular_policies/evaluations.csv")
 _SNAPSHOT_PATH = Path("artifacts/tabular/leduc-mccfr-final.npz")
 _CHECKPOINT_PATH = Path("runs/leduc-mccfr-final/checkpoints/latest.npz")
@@ -88,17 +89,20 @@ _SUMMARY_FIELDS: Final = (
 def run_mccfr_validation(
     output_directory: Path = Path("results") / VALIDATION_ID,
     *,
-    reference_directory: Path = _REFERENCE_DIRECTORY,
     tabular_reference_path: Path = _TABULAR_REFERENCE_PATH,
     snapshot_path: Path = _SNAPSHOT_PATH,
     checkpoint_path: Path = _CHECKPOINT_PATH,
     progress_callback: Callable[[str], None] | None = None,
 ) -> Path:
     """Validate optimised MCCFR against its reference and exact Leduc evaluation."""
-    reference_records = _load_reference_records(reference_directory)
     tabular_references = _load_tabular_references(tabular_reference_path)
     tabular_game = create_tabular_game(GameId.LEDUC)
     tree = tabular_game.tree
+    reference_records = _load_or_run_reference_records(
+        output_directory / "convergence.csv",
+        tree,
+        progress_callback,
+    )
     optimised_records: list[dict[str, object]] = []
     final_solvers: dict[int, MCCFR] = {}
     final_metrics: dict[int, StrategyMetrics] = {}
@@ -187,7 +191,7 @@ def run_mccfr_validation(
         duplicate_pairs=SELF_PLAY_DUPLICATE_PAIRS,
         seed=SELF_PLAY_SEED,
     )
-    checks = _validation_checks(summary, equivalence, self_play.includes_zero)
+    checks = _validation_checks(records, summary, equivalence, self_play.includes_zero)
 
     output_directory.mkdir(parents=True, exist_ok=True)
     convergence_path = output_directory / "convergence.csv"
@@ -223,6 +227,9 @@ def run_mccfr_validation(
                 "timed_region": "solver.train only",
                 "early_stopping": False,
                 "final_exploitability_limit": FINAL_EXPLOITABILITY_LIMIT,
+                "reference_final_median_exploitability_limit": (
+                    REFERENCE_FINAL_MEDIAN_EXPLOITABILITY_LIMIT
+                ),
                 "equivalence_iterations": EQUIVALENCE_ITERATIONS,
                 "equivalence_absolute_tolerance": EQUIVALENCE_ABSOLUTE_TOLERANCE,
                 "self_play_duplicate_pairs": SELF_PLAY_DUPLICATE_PAIRS,
@@ -267,25 +274,25 @@ def run_mccfr_validation(
     return validation_path
 
 
-def _load_reference_records(directory: Path) -> list[dict[str, object]]:
-    """Load and verify the committed reference convergence evidence."""
-    validation_path = directory / "validation.json"
-    try:
-        validation = json.loads(validation_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("reference MCCFR validation metadata is unreadable") from error
-    expected_configuration = validation.get("configuration", {})
-    if (
-        validation.get("passed") is not True
-        or expected_configuration.get("seeds") != list(SEEDS)
-        or expected_configuration.get("milestones") != list(SHARED_MILESTONES)
-    ):
-        raise ValueError("reference MCCFR validation does not match the declared workload")
-
+def _load_or_run_reference_records(
+    convergence_path: Path,
+    tree: IndexedGameTree,
+    progress_callback: Callable[[str], None] | None,
+) -> list[dict[str, object]]:
+    """Reuse final evidence when available, otherwise run the reference workload."""
+    if not convergence_path.is_file():
+        return _run_reference_records(tree, progress_callback)
     records: list[dict[str, object]] = []
     try:
-        with (directory / "convergence.csv").open(encoding="utf-8", newline="") as input_file:
+        with convergence_path.open(encoding="utf-8", newline="") as input_file:
             for record in csv.DictReader(input_file):
+                if record.get("implementation") != "reference":
+                    continue
+                if (
+                    record.get("game") != GameId.LEDUC.value
+                    or record.get("solver") != "naive_mccfr"
+                ):
+                    raise ValueError("reference MCCFR record has incompatible identifiers")
                 records.append(
                     _strategy_record(
                         implementation="reference",
@@ -300,8 +307,47 @@ def _load_reference_records(directory: Path) -> list[dict[str, object]]:
                 )
     except (OSError, KeyError, TypeError, ValueError) as error:
         raise ValueError("reference MCCFR convergence records are unreadable") from error
-    if len(records) != len(SEEDS) * len(SHARED_MILESTONES):
+    expected_keys = {(seed, milestone) for seed in SEEDS for milestone in SHARED_MILESTONES}
+    actual_keys = {
+        (int(_number(record, "seed")), int(_number(record, "iteration"))) for record in records
+    }
+    if len(records) != len(expected_keys) or actual_keys != expected_keys:
         raise ValueError("reference MCCFR convergence records are incomplete")
+    return records
+
+
+def _run_reference_records(
+    tree: IndexedGameTree,
+    progress_callback: Callable[[str], None] | None,
+) -> list[dict[str, object]]:
+    """Generate reference convergence rows when no committed rows are available."""
+    records: list[dict[str, object]] = []
+    for seed_number, seed in enumerate(SEEDS, start=1):
+        _report_progress(
+            progress_callback,
+            f"reference seed {seed_number}/{len(SEEDS)}: {seed}",
+        )
+        solver = NaiveMCCFR(tree, seed=seed)
+        elapsed_training_seconds = 0.0
+        previous_iteration = 0
+        for milestone in SHARED_MILESTONES:
+            start_time = perf_counter()
+            solver.train(milestone - previous_iteration)
+            elapsed_training_seconds += perf_counter() - start_time
+            metrics = evaluate_strategy(tree, solver.average_policy())
+            records.append(
+                _strategy_record(
+                    implementation="reference",
+                    solver="naive_mccfr",
+                    seed=seed,
+                    iteration=milestone,
+                    elapsed_training_seconds=elapsed_training_seconds,
+                    expected_value_player_zero=metrics.expected_values[0],
+                    exploitability=metrics.exploitability,
+                    nash_conv=metrics.nash_conv,
+                )
+            )
+            previous_iteration = milestone
     return records
 
 
@@ -428,6 +474,7 @@ def _same_draw_equivalence(tree: IndexedGameTree) -> dict[str, object]:
 
 
 def _validation_checks(
+    records: list[dict[str, object]],
     summary: list[dict[str, object]],
     equivalence: dict[str, object],
     self_play_includes_zero: bool,
@@ -441,6 +488,7 @@ def _validation_checks(
     shared_median = _number(optimised_shared, "median_exploitability")
     final_median = _number(optimised_final, "median_exploitability")
     return [
+        *_reference_convergence_checks(records, summary),
         {
             "name": "identical_draw_updates_match",
             **equivalence,
@@ -464,6 +512,50 @@ def _validation_checks(
             "name": "exported_snapshot_self_play_is_neutral",
             "passed": self_play_includes_zero,
             "confidence_level": 0.99,
+        },
+    ]
+
+
+def _reference_convergence_checks(
+    records: list[dict[str, object]],
+    summary: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Check sustained learning by the reference implementation and every seed."""
+    seed_exploitabilities: dict[str, dict[str, float]] = {}
+    for seed in SEEDS:
+        seed_records = [
+            record
+            for record in records
+            if record["implementation"] == "reference" and record["seed"] == seed
+        ]
+        first = _record_number(seed_records, SHARED_MILESTONES[0], "exploitability")
+        final = _record_number(seed_records, SHARED_MILESTONES[-1], "exploitability")
+        seed_exploitabilities[str(seed)] = {"first": first, "final": final}
+
+    median_exploitabilities = [
+        _number(_summary_record(summary, "reference", milestone), "median_exploitability")
+        for milestone in SHARED_MILESTONES
+    ]
+    return [
+        {
+            "name": "reference_every_seed_improves_over_the_declared_workload",
+            "passed": all(
+                values["final"] < values["first"] for values in seed_exploitabilities.values()
+            ),
+            "first_iteration": SHARED_MILESTONES[0],
+            "final_iteration": SHARED_MILESTONES[-1],
+            "seed_exploitabilities": seed_exploitabilities,
+        },
+        {
+            "name": "reference_median_exploitability_decreases_at_every_milestone",
+            "passed": all(later < earlier for earlier, later in pairwise(median_exploitabilities)),
+            "median_exploitabilities": median_exploitabilities,
+        },
+        {
+            "name": "reference_final_median_reaches_declared_correctness_scale",
+            "passed": (median_exploitabilities[-1] <= REFERENCE_FINAL_MEDIAN_EXPLOITABILITY_LIMIT),
+            "limit": REFERENCE_FINAL_MEDIAN_EXPLOITABILITY_LIMIT,
+            "final_median_exploitability": median_exploitabilities[-1],
         },
     ]
 
@@ -496,6 +588,18 @@ def _summary_record(
     ]
     if len(matches) != 1:
         raise RuntimeError("MCCFR summary records are incomplete or duplicated")
+    return matches[0]
+
+
+def _record_number(
+    records: list[dict[str, object]],
+    iteration: int,
+    field: str,
+) -> float:
+    """Return one numeric field from a unique iteration record."""
+    matches = [_number(record, field) for record in records if record["iteration"] == iteration]
+    if len(matches) != 1:
+        raise RuntimeError("MCCFR convergence records are incomplete or duplicated")
     return matches[0]
 
 
