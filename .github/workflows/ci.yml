@@ -33,6 +33,8 @@ jobs:
       - name: Install development environment
         run: |
           python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu torch==2.13.0
           .venv/bin/python -m pip install --disable-pip-version-check -e ".[dev]"
 
       - name: Lint
@@ -53,6 +55,26 @@ jobs:
       - name: Smoke-test installed wheel outside the checkout
         run: |
           python -m venv "${RUNNER_TEMP}/wheel-smoke"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip install --disable-pip-version-check \
+            --index-url https://download.pytorch.org/whl/cpu torch==2.13.0
           "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip install --disable-pip-version-check dist/*.whl
           cd "${RUNNER_TEMP}"
           "${RUNNER_TEMP}/wheel-smoke/bin/python" -c "from ac_cfr.games.holdem.evaluator import evaluate_holdem; assert evaluate_holdem((48, 44), (40, 36, 32, 0, 5)) == 1"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -c "from importlib.resources import files; static = files('ac_cfr.web').joinpath('static'); assert static.joinpath('index.html').is_file(); assert static.joinpath('app.js').is_file(); assert static.joinpath('styles.css').is_file()"
+          for command in ac-cfr-train ac-cfr-benchmark ac-cfr-evaluate ac-cfr-plot-results ac-cfr-download-models ac-cfr-web; do
+            "${RUNNER_TEMP}/wheel-smoke/bin/${command}" --help >/dev/null
+          done
+
+      - name: Build and smoke-test web container
+        run: |
+          docker build --tag ac-cfr-web:ci .
+          docker run --detach --name ac-cfr-web-smoke ac-cfr-web:ci
+          trap 'docker rm --force ac-cfr-web-smoke' EXIT
+          for attempt in {1..20}; do
+            if docker exec ac-cfr-web-smoke python -c "import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ac-cfr-web-smoke
+          exit 1

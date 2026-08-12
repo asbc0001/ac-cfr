@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Play compact poker games against frozen CFR policies.">
+    <title>AC CFR Strategy Demo</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <h1>AC CFR Strategy Demo</h1>
+        <p class="hero-copy">
+          Play individual poker hands against trained CFR strategies and fixed baseline
+          opponents. Every deal is temporary and disappears when this page is refreshed.
+        </p>
+        <p class="source-link">
+          Source: <a href="https://github.com/asbc0001/ac-cfr">github.com/asbc0001/ac-cfr</a>
+        </p>
+      </header>
+
+      <section class="control-panel" aria-labelledby="setup-heading">
+        <div>
+          <p class="section-label" id="setup-heading">Table setup</p>
+          <div class="selectors">
+            <div class="selector-field">
+              <label>
+                Game
+                <select id="game-select" disabled></select>
+              </label>
+              <button id="rules-button" class="text-button" type="button" disabled>
+                How does this game work?
+              </button>
+            </div>
+            <label>
+              Opponent
+              <select id="agent-select" disabled></select>
+            </label>
+            <label>
+              Policy
+              <select id="strategy-select" disabled></select>
+            </label>
+          </div>
+          <p id="policy-details" class="policy-details" aria-live="polite"></p>
+        </div>
+        <button id="start-button" class="primary-button" type="button" disabled>
+          New hand
+        </button>
+      </section>
+
+      <dialog id="rules-dialog" aria-labelledby="rules-title">
+        <div class="dialog-heading">
+          <p class="section-label">Game rules</p>
+          <form method="dialog">
+            <button class="dialog-close" type="submit">Close</button>
+          </form>
+        </div>
+        <h2 id="rules-title"></h2>
+        <p id="rules-summary" class="rules-summary"></p>
+        <ul id="rules-list" class="rules-list"></ul>
+      </dialog>
+
+      <p id="status-message" class="status-message" role="status" aria-live="polite">
+        Loading playable policies…
+      </p>
+
+      <section id="table" class="poker-table" aria-labelledby="table-heading" hidden>
+        <p class="section-label">Current hand</p>
+        <h2 id="table-heading">Poker table</h2>
+
+        <div class="hand-status" aria-live="polite">
+          <strong id="turn-status">Your turn</strong>
+          <strong id="pot"></strong>
+        </div>
+
+        <div class="cards-section">
+          <div>
+            <p class="section-label card-heading">
+              Your cards <span id="human-position" class="position-badge"></span>
+            </p>
+            <div id="private-cards" class="card-row"></div>
+            <p id="current-hand" class="current-hand"></p>
+          </div>
+          <div>
+            <p class="section-label">Board</p>
+            <div id="board-cards" class="card-row"></div>
+          </div>
+          <div>
+            <p class="section-label card-heading">
+              AI cards <span id="ai-position" class="position-badge"></span>
+            </p>
+            <div id="opponent-cards" class="card-row"></div>
+          </div>
+        </div>
+
+        <div class="table-grid">
+          <section class="table-panel" aria-labelledby="actions-heading">
+            <p class="section-label" id="actions-heading">Your action</p>
+            <div id="action-buttons" class="action-buttons"></div>
+            <p id="result" class="result" aria-live="polite"></p>
+            <div id="showdown-details" class="showdown-details" hidden></div>
+          </section>
+
+          <section class="table-panel" aria-labelledby="ai-heading">
+            <p class="section-label" id="ai-heading">Last AI decision</p>
+            <div id="ai-decision" class="empty-copy">The AI has not acted yet.</div>
+          </section>
+
+          <section class="table-panel history-panel" aria-labelledby="history-heading">
+            <p class="section-label" id="history-heading">Action history</p>
+            <ol id="action-history" class="history-list"></ol>
+          </section>
+        </div>
+      </section>
+
+      <footer>
+        <p>
+          AI actions are sampled from the displayed legal probabilities. Training never runs in
+          this application.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

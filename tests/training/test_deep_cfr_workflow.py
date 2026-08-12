@@ -63,11 +63,12 @@ def test_deep_cfr_run_resumes_metrics_and_exports_exactly_evaluable_snapshots(
     tmp_path: Path,
 ) -> None:
     tree = compile_game_tree(LeducGame(), LeducConfig())
-    outcome = start_deep_cfr_training(_run_config(), runs_root=tmp_path)
+    config = _run_config()
+    outcome = start_deep_cfr_training(config, runs_root=tmp_path)
     saved_config = json.loads(
         (outcome.run_directory / "run_config.json").read_text(encoding="utf-8")
     )
-    assert saved_config["run_config"] == _run_config().to_dict()
+    assert saved_config["run_config"] == config.to_dict()
     resume_path = outcome.run_directory / "checkpoints" / "iter_2.pt"
     latest_path = outcome.run_directory / "checkpoints" / "latest.pt"
     assert latest_path.is_symlink()
@@ -163,15 +164,16 @@ def test_deep_cfr_checkpoint_fails_before_writing_without_free_space(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    config = _run_config()
     monkeypatch.setattr(
         "ac_cfr.common.environment.shutil.disk_usage",
         lambda _: SimpleNamespace(free=0),
     )
 
     with pytest.raises(OSError, match="insufficient free space"):
-        start_deep_cfr_training(_run_config(), runs_root=tmp_path)
+        start_deep_cfr_training(config, runs_root=tmp_path)
 
-    checkpoint_directory = tmp_path / _run_config().run_id / "checkpoints"
+    checkpoint_directory = tmp_path / config.run_id / "checkpoints"
     assert not (checkpoint_directory / "latest.pt").exists()
     assert not tuple(checkpoint_directory.glob("*.tmp"))
 
@@ -213,9 +215,10 @@ def test_deep_cfr_preflight_checks_resources_without_creating_a_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    base_config = _run_config()
     config = replace(
-        _run_config(),
-        runtime=replace(_run_config().runtime, storage_budget_bytes=50_000_000_000),
+        base_config,
+        runtime=replace(base_config.runtime, storage_budget_bytes=50_000_000_000),
     )
     monkeypatch.setattr(
         "ac_cfr.training.deep_cfr_preflight.shutil.disk_usage",
@@ -227,7 +230,7 @@ def test_deep_cfr_preflight_checks_resources_without_creating_a_run(
     checks = report["checks"]
     assert isinstance(checks, dict)
     assert checks["network_forward_backward_finite"] is True
-    assert checks["checked_training_batch_size"] == _run_config().training.advantage_batch_size
+    assert checks["checked_training_batch_size"] == base_config.training.advantage_batch_size
     traversal_samples = checks["tiny_traversal_advantage_samples"]
     assert isinstance(traversal_samples, int)
     assert traversal_samples >= 1
@@ -236,7 +239,7 @@ def test_deep_cfr_preflight_checks_resources_without_creating_a_run(
     assert resources["filesystem_free_disk_bytes"] == 100_000_000_000
     assert resources["storage_budget_bytes"] == 50_000_000_000
     assert resources["free_disk_bytes"] == 50_000_000_000
-    assert not (tmp_path / _run_config().run_id).exists()
+    assert not (tmp_path / base_config.run_id).exists()
 
 
 def _information_state(

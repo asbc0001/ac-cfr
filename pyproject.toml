@@ -9,22 +9,27 @@ description = "Counterfactual regret minimisation poker research project"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi==0.139.2",
     "matplotlib==3.11.1",
     "numba==0.66.0",
     "numpy==2.4.6",
     "psutil==7.2.2",
     "torch==2.13.0",
+    "uvicorn==0.51.0",
 ]
 
 [project.scripts]
 ac-cfr-train = "ac_cfr.cli.train:main"
 ac-cfr-benchmark = "ac_cfr.cli.benchmark:main"
+ac-cfr-download-models = "ac_cfr.cli.download_models:main"
 ac-cfr-evaluate = "ac_cfr.cli.evaluate:main"
 ac-cfr-plot-results = "ac_cfr.cli.plot_results:main"
+ac-cfr-web = "ac_cfr.web.app:main"
 
 [project.optional-dependencies]
 dev = [
     "build==1.5.0",
+    "httpx2==2.0.0",
     "phevaluator==0.5.3.1",
     "pyright==1.1.411",
     "pytest==9.1.1",
@@ -36,6 +41,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "ac_cfr.games.holdem.evaluator.data" = ["*.bin", "*.json"]
+"ac_cfr.web" = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 addopts = [

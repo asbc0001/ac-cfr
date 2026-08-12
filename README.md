@@ -1,6 +1,6 @@
 # AC CFR
 
-A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It includes complete reference and optimised CFR, CFR+, external-sampling MCCFR, and Leduc Deep CFR pipelines, plus the shared Hold'em foundations.
+A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It includes reference and optimised CFR, CFR+, external-sampling MCCFR, and Deep CFR pipelines, plus a playable web demo.
 
 ## Current functionality
 
@@ -8,6 +8,7 @@ A research project for implementing, validating, and comparing counterfactual re
 - Exact evaluation, resumable training, playable snapshots, plotting, and reproducible benchmarks.
 - Validated tabular and neural agents with a checksum-protected strategy registry.
 - Conventional and modified HULHE engines with compact cards, fast evaluation, and suit-canonical information states.
+- An ephemeral FastAPI and vanilla-JavaScript interface for playing against frozen policies.
 
 ## CFR and CFR+
 
@@ -154,13 +155,54 @@ Plot one run or compare several runs with:
 python plot_results.py runs/leduc-cfr-final runs/leduc-cfr-plus-final
 ```
 
-Run output stays under ignored `runs/`, selected snapshots under ignored `artifacts/`, and compact evidence under version-controlled `results/`. Policy publication and downloading will be added with the web work.
+Run output stays under ignored `runs/`, selected snapshots under ignored `artifacts/`, and compact evidence under version-controlled `results/`.
+
+## Web demo
+
+The single-page FastAPI demo plays directly through the shared game engines and frozen `PlayableAgent` implementations. It never trains a solver during a request.
+
+The current registry exposes:
+
+| Game | Playable opponents |
+|---|---|
+| Kuhn | Random, final CFR, final CFR+ |
+| Leduc | Random, final CFR/CFR+/MCCFR, early/intermediate/final Deep CFR |
+| Modified HULHE | Random, rule-based, temporary local Deep CFR development snapshot |
+
+Install registry-declared strategy snapshots from a staged release directory with:
+
+```bash
+python download_models.py --source-directory /path/to/release-assets
+```
+
+`ac-cfr-download-models` is the equivalent installed command. Without `--source-directory`, it fetches assets from the GitHub release tags recorded in the registry. Installation is atomic and requires the declared file size and SHA-256 checksum to match. Random and rule-based opponents require no downloaded file.
+
+The two-iteration modified-HULHE snapshot exists only for local interface development and provides no strategy-quality evidence. Its registry entry and artefact will be replaced after the final cloud policy is selected.
+
+Start the local single-worker application with:
+
+```bash
+ac-cfr-web --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000`. The selected game's concise rules are available from the table setup panel. The browser receives only player-visible state. Hands live temporarily in one server process, use opaque random identifiers and version-checked actions, and are not stored in cookies, browser storage or a database. Refreshing loses the current hand; **New hand** explicitly discards it before dealing another.
+
+Build and run the same application in Docker with:
+
+```bash
+docker build -t ac-cfr-web .
+docker run --rm --user "$(id -u):$(id -g)" -p 8000:8000 \
+    -v "$(pwd)/artifacts:/app/artifacts:ro" \
+    ac-cfr-web
+```
+
+The user mapping lets the non-root container read owner-only local snapshots without weakening their permissions. The image uses CPU-only PyTorch because the demo performs inference on CPU; cloud training retains its CUDA environment. The artefact mount is optional when using only random or rule-based opponents. The application uses one Uvicorn worker because hands are held temporarily in process memory.
 
 ## Modified HULHE
 
 Modified HULHE begins on the flop with each player contributing one small bet to a two-small-bet pot. Flop, turn, and river use standard heads-up fixed-limit position and sizing, but each round allows only an opening bet and one raise.
 
-The same engine supports conventional HULHE from the pre-flop blinds with four betting levels per round. Modified HULHE is the planned Deep CFR target.
+The same engine supports conventional HULHE from the pre-flop blinds with four betting levels per round. Modified HULHE is the production Deep CFR target.
 
 Cloud presets declare `storage_budget_bytes` as the usable persistent-storage ceiling for the run. Preflight uses the smaller of this configured budget and the backing filesystem's reported free space. Live metrics and checkpoint guards also subtract existing run files from the configured budget. The separate backing-filesystem value remains visible because shared filesystems may report capacity that is not allocated to the current machine. Memory checks use the effective cgroup limit rather than the host's physical-memory total.
 
@@ -204,7 +246,8 @@ src/ac_cfr/
 ├── games/           Kuhn, Leduc, Hold'em, and shared indexed-tree contracts
 ├── persistence/     Checkpoints, snapshots, registry, and compact results
 ├── solvers/         Reference and optimised CFR, CFR+, MCCFR, and Deep CFR
-└── training/        Reproducible tabular and neural training schedules
+├── training/        Reproducible tabular and neural training schedules
+└── web/             Ephemeral FastAPI gameplay and packaged browser assets
 ```
 
 Game states hold complete hand data, while playable agents act through player-visible `InformationState` values. Solver strategies are also indexed by information set, preventing decisions from using hidden opponent cards. Kuhn and Leduc use precomputed trees; Hold'em uses compact on-demand transitions rather than pre-enumerating its full tree.
@@ -221,4 +264,4 @@ Development uses a single `main` branch. Run the local checks before each direct
 
 Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
 
-Next: scale the validated Deep CFR pipeline to modified HULHE and calibrate it on representative hardware before the long cloud run.
+Next: select and publish the final modified-HULHE policy, replace the temporary registry entry, repeat the completed container gate with that final artefact, and deploy the demo.

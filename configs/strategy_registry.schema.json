@@ -40,7 +40,7 @@
       "properties": {
         "strategy_id": {"type": "string", "minLength": 1},
         "label": {"type": "string", "minLength": 1},
-        "game": {"enum": ["kuhn", "leduc"]},
+        "game": {"enum": ["kuhn", "leduc", "holdem"]},
         "game_version": {"type": "string", "minLength": 1},
         "algorithm": {"type": "string", "minLength": 1},
         "agent_type": {"enum": ["baseline", "tabular", "neural"]},
@@ -69,13 +69,31 @@
               "release_id": {"type": "null"},
               "file_size": {"type": "null"},
               "sha256": {"type": "null"}
-            }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "algorithm": {"const": "uniform_random"},
+                  "model_config_id": {"const": "uniform_random"}
+                }
+              },
+              {
+                "properties": {
+                  "game": {"const": "holdem"},
+                  "game_version": {"const": "modified_hulhe"},
+                  "algorithm": {"const": "rule_based_v1"},
+                  "model_config_id": {"const": "rule_based_v1"},
+                  "state_encoding": {"const": "holdem"}
+                }
+              }
+            ]
           }
         },
         {
           "if": {"properties": {"agent_type": {"const": "tabular"}}},
           "then": {
             "properties": {
+              "game": {"enum": ["kuhn", "leduc"]},
               "snapshot_id": {"type": "string", "minLength": 1},
               "local_path": {"type": "string", "pattern": "^artifacts/.+"},
               "tree_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -90,17 +108,34 @@
           "if": {"properties": {"agent_type": {"const": "neural"}}},
           "then": {
             "properties": {
-              "game": {"const": "leduc"},
               "algorithm": {"const": "deep_cfr"},
               "snapshot_id": {"type": "string", "minLength": 1},
               "local_path": {"type": "string", "pattern": "^artifacts/.+"},
-              "state_encoding": {"const": "leduc_neural"},
+              "state_encoding": {"enum": ["leduc_neural", "holdem"]},
               "tree_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
               "artifact_schema_version": {"const": 1},
               "release_id": {"type": "string", "minLength": 1},
               "file_size": {"type": "integer", "minimum": 1},
               "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-            }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "game": {"const": "leduc"},
+                  "game_version": {"const": "leduc"},
+                  "model_config_id": {"const": "leduc_deep_cfr"},
+                  "state_encoding": {"const": "leduc_neural"}
+                }
+              },
+              {
+                "properties": {
+                  "game": {"const": "holdem"},
+                  "game_version": {"const": "modified_hulhe"},
+                  "model_config_id": {"const": "modified_hulhe_deep_cfr"},
+                  "state_encoding": {"const": "holdem"}
+                }
+              }
+            ]
           }
         }
       ]

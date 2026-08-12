@@ -9,11 +9,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ac_cfr.agents.base import PlayableAgent
-from ac_cfr.agents.baselines import BaselineAgent
+from ac_cfr.agents.baselines import RULE_BASED_AGENT_ID, BaselineAgent, RuleBasedAgent
 from ac_cfr.agents.neural import NeuralAgent
 from ac_cfr.agents.tabular import TabularAgent
-from ac_cfr.common.config import ModelConfigId, StateEncodingId
+from ac_cfr.common.config import GameConfigurationId, ModelConfigId, StateEncodingId
 from ac_cfr.games.base import GameId
+from ac_cfr.games.holdem.engine import HoldemConfig
 from ac_cfr.games.tabular import TabularGame, create_tabular_game
 from ac_cfr.persistence.compatibility import ACTION_SPACE_ID, TABULAR_MODEL_CONFIG_ID
 from ac_cfr.persistence.deep_cfr_snapshots import (
@@ -59,13 +60,27 @@ class StrategyRegistryEntry:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedStrategy:
-    """A registry entry, its canonical game, and its loaded agent."""
+    """A registry entry, compatible game configuration, and loaded agent."""
 
     entry: StrategyRegistryEntry
-    tabular_game: TabularGame
+    game: TabularGame | HoldemConfig
     agent: PlayableAgent
-    policy: NDArray[np.float64]
+    _policy: NDArray[np.float64] | None
     snapshot_metadata: TabularSnapshotMetadata | DeepCFRSnapshotMetadata | None
+
+    @property
+    def tabular_game(self) -> TabularGame:
+        """Return the exact-evaluation game or reject a Hold'em strategy."""
+        if not isinstance(self.game, TabularGame):
+            raise ValueError("strategy does not have a tabular game tree")
+        return self.game
+
+    @property
+    def policy(self) -> NDArray[np.float64]:
+        """Return the enumerated policy or reject an on-demand Hold'em strategy."""
+        if self._policy is None:
+            raise ValueError("strategy does not have an enumerated policy")
+        return self._policy
 
 
 class StrategyRegistry:
@@ -92,39 +107,51 @@ class StrategyRegistry:
             entry = self._entries[strategy_id]
         except KeyError as error:
             raise ValueError(f"unknown strategy_id: {strategy_id}") from error
-        tabular_game = create_tabular_game(GameId(entry.game))
-        if entry.game_version != tabular_game.configuration_id.value:
+        game = _create_registry_game(entry)
+        configuration_id = game.configuration_id
+        assert configuration_id is not None
+        if entry.game_version != configuration_id.value:
             raise ValueError("registry entry has an incompatible game_version")
         if entry.action_space != ACTION_SPACE_ID:
             raise ValueError("registry entry has an incompatible action_space")
 
         if entry.agent_type == "baseline":
-            _require_state_encoding(entry, tabular_game.state_encoding_id.value)
-            policy = _uniform_policy(tabular_game)
-            policy.setflags(write=False)
-            return ResolvedStrategy(entry, tabular_game, BaselineAgent(), policy, None)
+            _require_state_encoding(entry, game.state_encoding_id.value)
+            agent = BaselineAgent() if entry.algorithm == "uniform_random" else RuleBasedAgent()
+            policy = _uniform_policy(game) if isinstance(game, TabularGame) else None
+            if policy is not None:
+                policy.setflags(write=False)
+            return ResolvedStrategy(entry, game, agent, policy, None)
         path = self._resolve_file_path(entry)
         if entry.agent_type == "tabular":
-            _require_state_encoding(entry, tabular_game.state_encoding_id.value)
-            snapshot = load_tabular_snapshot(path, tabular_game)
+            if not isinstance(game, TabularGame):
+                raise ValueError("tabular strategies require Kuhn or Leduc")
+            _require_state_encoding(entry, game.state_encoding_id.value)
+            snapshot = load_tabular_snapshot(path, game)
             _require_snapshot_metadata(entry, snapshot.metadata)
             return ResolvedStrategy(
                 entry,
-                tabular_game,
-                TabularAgent(tabular_game, snapshot),
+                game,
+                TabularAgent(game, snapshot),
                 snapshot.average_policy,
                 snapshot.metadata,
             )
         if entry.agent_type == "neural":
-            snapshot = load_deep_cfr_snapshot(path, tabular_game.tree)
+            snapshot_game = game.tree if isinstance(game, TabularGame) else game
+            snapshot = load_deep_cfr_snapshot(path, snapshot_game)
             _require_snapshot_metadata(entry, snapshot.metadata)
             if snapshot.metadata.solver != "optimised":
                 raise ValueError("registered neural strategy must use the optimised solver")
+            policy = (
+                deep_cfr_policy(game.tree, snapshot.network)
+                if isinstance(game, TabularGame)
+                else None
+            )
             return ResolvedStrategy(
                 entry,
-                tabular_game,
+                game,
                 NeuralAgent(snapshot),
-                deep_cfr_policy(tabular_game.tree, snapshot.network),
+                policy,
                 snapshot.metadata,
             )
         raise ValueError(f"unsupported agent_type: {entry.agent_type}")
@@ -133,12 +160,7 @@ class StrategyRegistry:
         """Resolve and integrity-check a registry-owned artefact path."""
         if entry.local_path is None or entry.file_size is None or entry.sha256 is None:
             raise ValueError("file-backed registry entry is incomplete")
-        relative_path = PurePosixPath(entry.local_path)
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            raise ValueError("registry local_path must remain within the project root")
-        path = (self._project_root / Path(*relative_path.parts)).resolve()
-        if not path.is_relative_to(self._project_root):
-            raise ValueError("registry local_path escapes the project root")
+        path = strategy_artifact_path(entry, project_root=self._project_root)
         if not path.is_file():
             raise ValueError("registered strategy file does not exist")
         if path.stat().st_size != entry.file_size:
@@ -177,6 +199,20 @@ def load_strategy_registry(path: Path, *, project_root: Path) -> StrategyRegistr
     return StrategyRegistry(entries, project_root)
 
 
+def strategy_artifact_path(entry: StrategyRegistryEntry, *, project_root: Path) -> Path:
+    """Resolve one registry-owned artefact destination without accessing it."""
+    if entry.local_path is None:
+        raise ValueError("strategy entry does not reference an artefact")
+    relative_path = PurePosixPath(entry.local_path)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError("registry local_path must remain within the project root")
+    root = project_root.resolve()
+    path = (root / Path(*relative_path.parts)).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("registry local_path escapes the project root")
+    return path
+
+
 def _parse_entry(raw_entry: object) -> StrategyRegistryEntry:
     """Parse one exact-schema registry entry and validate its values."""
     expected_fields = set(StrategyRegistryEntry.__dataclass_fields__)
@@ -209,14 +245,38 @@ def _validate_entry(entry: StrategyRegistryEntry) -> None:
         game_id = GameId(entry.game)
     except ValueError as error:
         raise ValueError("strategy entry game is unknown") from error
-    if game_id not in (GameId.KUHN, GameId.LEDUC):
+    if game_id not in (GameId.KUHN, GameId.LEDUC, GameId.HOLD_EM):
         raise ValueError("strategy entry game is unsupported")
+    expected_game_version = {
+        GameId.KUHN: GameConfigurationId.KUHN.value,
+        GameId.LEDUC: GameConfigurationId.LEDUC.value,
+        GameId.HOLD_EM: GameConfigurationId.MODIFIED_HULHE.value,
+    }[game_id]
+    if entry.game_version != expected_game_version:
+        raise ValueError("strategy entry game_version is incompatible")
+    if entry.action_space != ACTION_SPACE_ID:
+        raise ValueError("strategy entry action_space is incompatible")
     if isinstance(entry.training_iteration, bool) or not isinstance(entry.training_iteration, int):
         raise ValueError("strategy entry training_iteration must be an integer")
     if entry.training_iteration < 0 or not isinstance(entry.evaluation, dict):
         raise ValueError("strategy entry training metadata is invalid")
 
     if entry.agent_type == "baseline":
+        if entry.algorithm not in {"uniform_random", RULE_BASED_AGENT_ID}:
+            raise ValueError("baseline strategy entry algorithm is unsupported")
+        if entry.model_config_id != entry.algorithm:
+            raise ValueError("baseline strategy entry model_config_id is incompatible")
+        if entry.training_iteration != 0:
+            raise ValueError("baseline strategy entry must have iteration zero")
+        if entry.algorithm == RULE_BASED_AGENT_ID and game_id is not GameId.HOLD_EM:
+            raise ValueError("rule-based strategy entry requires modified HULHE")
+        expected_encoding = {
+            GameId.KUHN: StateEncodingId.KUHN.value,
+            GameId.LEDUC: StateEncodingId.LEDUC.value,
+            GameId.HOLD_EM: StateEncodingId.HOLD_EM.value,
+        }[game_id]
+        if entry.state_encoding != expected_encoding:
+            raise ValueError("baseline strategy entry state_encoding is incompatible")
         optional_values = (
             entry.snapshot_id,
             entry.local_path,
@@ -231,16 +291,34 @@ def _validate_entry(entry: StrategyRegistryEntry) -> None:
         return
     if entry.agent_type not in {"tabular", "neural"}:
         raise ValueError("strategy entry agent_type is unsupported")
+    if entry.agent_type == "tabular" and game_id not in (GameId.KUHN, GameId.LEDUC):
+        raise ValueError("tabular strategy entry requires Kuhn or Leduc")
     if entry.agent_type == "tabular" and entry.model_config_id != TABULAR_MODEL_CONFIG_ID:
         raise ValueError("tabular strategy entry model_config_id is incompatible")
+    if entry.agent_type == "tabular":
+        expected_encoding = (
+            StateEncodingId.KUHN.value if game_id is GameId.KUHN else StateEncodingId.LEDUC.value
+        )
+        if entry.state_encoding != expected_encoding:
+            raise ValueError("tabular strategy entry state_encoding is incompatible")
     if entry.agent_type == "neural":
-        if game_id is not GameId.LEDUC or entry.algorithm != "deep_cfr":
-            raise ValueError("neural strategy entry must describe Leduc Deep CFR")
+        if game_id not in (GameId.LEDUC, GameId.HOLD_EM) or entry.algorithm != "deep_cfr":
+            raise ValueError("neural strategy entry must describe Deep CFR")
         try:
             ModelConfigId(entry.model_config_id)
         except ValueError as error:
             raise ValueError("neural strategy model_config_id is incompatible") from error
-        if entry.state_encoding != StateEncodingId.LEDUC_NEURAL.value:
+        expected_model = (
+            ModelConfigId.LEDUC_DEEP_CFR
+            if game_id is GameId.LEDUC
+            else ModelConfigId.MODIFIED_HULHE_DEEP_CFR
+        )
+        expected_encoding = (
+            StateEncodingId.LEDUC_NEURAL if game_id is GameId.LEDUC else StateEncodingId.HOLD_EM
+        )
+        if entry.model_config_id != expected_model.value:
+            raise ValueError("neural strategy model_config_id is incompatible")
+        if entry.state_encoding != expected_encoding.value:
             raise ValueError("neural strategy state_encoding is incompatible")
     required_strings = (
         entry.snapshot_id,
@@ -272,6 +350,16 @@ def _require_state_encoding(entry: StrategyRegistryEntry, expected: str) -> None
         raise ValueError("registry entry has an incompatible state_encoding")
 
 
+def _create_registry_game(entry: StrategyRegistryEntry) -> TabularGame | HoldemConfig:
+    """Construct the exact game configuration declared by a registry entry."""
+    game_id = GameId(entry.game)
+    if game_id in (GameId.KUHN, GameId.LEDUC):
+        return create_tabular_game(game_id)
+    if entry.game_version != GameConfigurationId.MODIFIED_HULHE.value:
+        raise ValueError("registry supports only the modified Hold'em configuration")
+    return HoldemConfig.modified()
+
+
 def _require_snapshot_metadata(
     entry: StrategyRegistryEntry,
     metadata: TabularSnapshotMetadata | DeepCFRSnapshotMetadata,
@@ -279,8 +367,12 @@ def _require_snapshot_metadata(
     """Require loaded snapshot metadata to match its registry entry."""
     expected_metadata = {
         "snapshot_id": entry.snapshot_id,
+        "game": entry.game,
+        "game_version": entry.game_version,
         "training_iteration": entry.training_iteration,
         "model_config_id": entry.model_config_id,
+        "state_encoding": entry.state_encoding,
+        "action_space": entry.action_space,
         "tree_digest": entry.tree_digest,
         "artifact_schema_version": entry.artifact_schema_version,
     }
