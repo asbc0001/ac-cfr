@@ -128,13 +128,15 @@ tmux new-session -d -s hulhe-shakedown \
 tmux attach-session -t hulhe-shakedown
 ```
 
-For the interruption test, send `Ctrl-C` after at least one iteration has completed:
+For the interruption test, wait until at least one iteration has completed, then identify the coordinator process attached to the tmux pane:
 
 ```bash
-tmux send-keys -t hulhe-shakedown C-c
+tmux display-message -p -t hulhe-shakedown '#{pane_pid}'
+ps -o pid,ppid,pgid,stat,etime,cmd -p <PID>
+kill -TERM <PID>
 ```
 
-The signal requests a stop at the end of the active outer iteration, where a complete checkpoint is saved. After the command exits, resume the immutable saved configuration:
+Confirm from the `ps` output that `<PID>` is the training coordinator before signalling it. Sending `SIGTERM` only to that process avoids forwarding terminal `SIGINT` to traversal workers. The coordinator requests a stop at the end of the active outer iteration, writes its snapshot, checkpoint and metrics, then exits. Resume the immutable saved configuration after it has stopped:
 
 ```bash
 tmux new-session -d -s hulhe-shakedown-resume \
