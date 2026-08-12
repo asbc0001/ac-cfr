@@ -98,9 +98,21 @@ Each completed iteration records training and held-out losses, phase times, trav
 
 ## Progression evaluation
 
-The evaluator compares validated average-strategy snapshots against uniform random, fixed snapshot anchors, themselves for neutrality and selected earlier snapshots. Each physical deal is replayed with the agents swapped between seats while retaining the same seat-labelled private cards and public runout. The two focal-policy outcomes form one independent duplicate-pair score.
+The evaluator compares validated average-strategy snapshots against uniform random, the frozen `rule_based_v1` baseline, fixed snapshot anchors, themselves for neutrality and selected earlier snapshots. Each physical deal is replayed with the agents swapped between seats while retaining the same seat-labelled private cards and public runout. The two focal-policy outcomes form one independent duplicate-pair score.
 
-Results report `mbb/g` with seeded paired-bootstrap confidence intervals and are atomically upserted into a compact CSV used directly for plotting. A rule-based opponent remains deferred because no defensible fixed implementation currently exists.
+Results report `mbb/g` with seeded paired-bootstrap confidence intervals and are atomically upserted into a compact CSV used directly for plotting. The rule-based baseline uses only the acting player's visible cards and public betting state.
+
+| Strength | Examples | Facing no bet | Facing a bet |
+|---|---|---|---|
+| Very weak | High card or board-only strength | Check | Fold |
+| Weak made | Bottom/middle pair or pocket underpair | Check | Fold |
+| Marginal/draw | Top pair, pocket overpair or private-card flush/straight draw | Check | Call |
+| Strong | Two pair, trips, straight or flush | Bet | Call; raise on river |
+| Very strong | Full house, quads or straight flush | Bet | Raise |
+
+A made hand counts only when a hole card contributes to it. On the complete river, the exact best five-card hand, including kickers, must improve the board's five-card hand. Draws are ignored on the river. The agent is deterministic, does not adapt or bluff, and falls back to check/call when the fixed-limit betting cap prevents a raise.
+
+These deliberately simple rules are frozen as `rule_based_v1`. They do not use pot odds, opponent modelling, hidden cards, Monte Carlo equity or learned-policy information. Results against this opponent measure performance against one understandable fixed policy, not exploitability.
 
 The fixed shakedown protocol uses 10,000 duplicate pairs, seed 20260811, a 95% interval and 10,000 bootstrap resamples. Multiple snapshots evaluate each later policy against every selected earlier policy; `--anchor-snapshot PATH` can add a fixed policy from another run.
 
@@ -152,6 +164,7 @@ After all three snapshots exist, run the seeded duplicate-deal progression evalu
   --snapshot runs/modified-hulhe-shakedown/strategy_snapshots/modified-hulhe-shakedown_iter_2.pt \
   --snapshot runs/modified-hulhe-shakedown/strategy_snapshots/modified-hulhe-shakedown_iter_3.pt \
   --include-random \
+  --include-rule-based \
   --include-self-play \
   --duplicate-pairs 10000 \
   --seed 20260811 \

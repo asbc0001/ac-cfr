@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 
-from ac_cfr.agents import BaselineAgent, NeuralAgent, PlayableAgent
+from ac_cfr.agents import (
+    RULE_BASED_AGENT_ID,
+    BaselineAgent,
+    NeuralAgent,
+    PlayableAgent,
+    RuleBasedAgent,
+)
 from ac_cfr.common.config import GameConfigurationId
 from ac_cfr.evaluation.holdem_h2h import HoldemDuplicateResult, evaluate_holdem_duplicate_match
 from ac_cfr.games.base import GameId, UtilityUnit
@@ -24,6 +30,17 @@ class _SnapshotStrategy:
 
     metadata: DeepCFRSnapshotMetadata
     agent: NeuralAgent
+
+
+@dataclass(frozen=True, slots=True)
+class _FixedOpponent:
+    """One named non-snapshot comparison policy."""
+
+    opponent_id: str
+    agent: PlayableAgent
+
+
+type _Opponent = _SnapshotStrategy | _FixedOpponent
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -48,6 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="fixed snapshot opponent; repeat for multiple anchors",
     )
     parser.add_argument("--include-random", action="store_true")
+    parser.add_argument("--include-rule-based", action="store_true")
     parser.add_argument("--include-self-play", action="store_true")
     parser.add_argument("--duplicate-pairs", required=True, type=int)
     parser.add_argument("--seed", required=True, type=int)
@@ -68,26 +86,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         snapshots,
         anchors,
         include_random=arguments.include_random,
+        include_rule_based=arguments.include_rule_based,
         include_self_play=arguments.include_self_play,
     )
     if not matches:
         parser.error(
-            "select random or an anchor for one snapshot, or provide at least two snapshots"
+            "select a baseline or anchor for one snapshot, or provide at least two snapshots"
         )
 
     store = HoldemH2HResultStore(arguments.results)
     for focal, opponent in matches:
-        opponent_agent: PlayableAgent = opponent.agent if opponent else BaselineAgent()
         result = evaluate_holdem_duplicate_match(
             focal.agent,
-            opponent_agent,
+            opponent.agent,
             duplicate_pairs=arguments.duplicate_pairs,
             seed=arguments.seed,
             confidence_level=arguments.confidence_level,
             bootstrap_resamples=arguments.bootstrap_resamples,
         )
         _store_result(store, focal, opponent, result)
-        opponent_id = opponent.metadata.snapshot_id if opponent else "uniform_random"
+        opponent_id = _opponent_id(opponent)
         print(
             f"{focal.metadata.snapshot_id} vs {opponent_id}: "
             f"{result.mbb_per_game:.6g} mbb/g "
@@ -142,12 +160,17 @@ def _build_matches(
     anchors: tuple[_SnapshotStrategy, ...],
     *,
     include_random: bool,
+    include_rule_based: bool,
     include_self_play: bool,
-) -> tuple[tuple[_SnapshotStrategy, _SnapshotStrategy | None], ...]:
+) -> tuple[tuple[_SnapshotStrategy, _Opponent], ...]:
     """Build baseline, self-play, fixed-anchor, and snapshot round-robin matches."""
-    matches: list[tuple[_SnapshotStrategy, _SnapshotStrategy | None]] = []
+    matches: list[tuple[_SnapshotStrategy, _Opponent]] = []
     if include_random:
-        matches.extend((snapshot, None) for snapshot in snapshots)
+        random_opponent = _FixedOpponent("uniform_random", BaselineAgent())
+        matches.extend((snapshot, random_opponent) for snapshot in snapshots)
+    if include_rule_based:
+        rule_opponent = _FixedOpponent(RULE_BASED_AGENT_ID, RuleBasedAgent())
+        matches.extend((snapshot, rule_opponent) for snapshot in snapshots)
     if include_self_play:
         matches.extend((snapshot, snapshot) for snapshot in snapshots)
     matches.extend((snapshot, anchor) for snapshot in snapshots for anchor in anchors)
@@ -158,12 +181,12 @@ def _build_matches(
 def _store_result(
     store: HoldemH2HResultStore,
     focal: _SnapshotStrategy,
-    opponent: _SnapshotStrategy | None,
+    opponent: _Opponent,
     result: HoldemDuplicateResult,
 ) -> None:
     """Upsert one compact result linked to both snapshot metadata records."""
     focal_metadata = focal.metadata
-    opponent_metadata = opponent.metadata if opponent else None
+    opponent_metadata = opponent.metadata if isinstance(opponent, _SnapshotStrategy) else None
     store.upsert(
         {
             "game": GameId.HOLD_EM.value,
@@ -175,9 +198,7 @@ def _store_result(
             "source_checkpoint_id": focal_metadata.source_checkpoint_id,
             "iteration": focal_metadata.training_iteration,
             "seed": result.seed,
-            "opponent_id": (
-                opponent_metadata.snapshot_id if opponent_metadata else "uniform_random"
-            ),
+            "opponent_id": _opponent_id(opponent),
             "opponent_snapshot_id": opponent_metadata.snapshot_id if opponent_metadata else "",
             "opponent_iteration": (
                 opponent_metadata.training_iteration if opponent_metadata else 0
@@ -192,3 +213,10 @@ def _store_result(
             "bootstrap_resamples": result.bootstrap_resamples,
         }
     )
+
+
+def _opponent_id(opponent: _Opponent) -> str:
+    """Return the stable result identifier for any opponent type."""
+    if isinstance(opponent, _SnapshotStrategy):
+        return opponent.metadata.snapshot_id
+    return opponent.opponent_id
