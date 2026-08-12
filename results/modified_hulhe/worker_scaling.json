@@ -1,0 +1,43 @@
+{
+  "about": "One-factor traversal-worker comparison for the optimised modified-HULHE Deep CFR production candidate.",
+  "code_revision": "a4035d150e9b74663a4d403db86aa1f6432708b5-dirty",
+  "decision": {
+    "collection_throughput_improvement_over_10_percent": 7.265456863054642,
+    "iteration_time_improvement_over_10_percent": 4.943727354119654,
+    "selected_traversal_workers": 12
+  },
+  "execution_order": [
+    8,
+    10,
+    12
+  ],
+  "files": {
+    "measurements": "worker_scaling.csv",
+    "plot": "plots/worker_scaling.png"
+  },
+  "method": {
+    "advantage_batch_size": 10000,
+    "advantage_training_steps": 100,
+    "complete_outer_iterations": 1,
+    "device": "cuda",
+    "fixed_learning_parameters": true,
+    "inference_batch_size": 1024,
+    "model_config_id": "modified_hulhe_deep_cfr",
+    "one_factor_at_a_time": true,
+    "seed": 20260811,
+    "strategy_batch_size": 10000,
+    "strategy_training_steps": 100,
+    "traversals_per_player": 10000,
+    "varied_factor": "traversal_workers"
+  },
+  "notes": [
+    "Learning steps were identically bounded to isolate worker scaling without repeating the expensive 32,000-update diagnostic fit.",
+    "The eight-worker run incurred a one-time neural warm-up cost; separated traversal time remains the primary worker-selection measurement.",
+    "The production shakedown must remeasure complete iteration cost with the selected 32,000-step advantage budget."
+  ],
+  "source_runs": [
+    "runs/modified-hulhe-worker-8",
+    "runs/modified-hulhe-worker-10",
+    "runs/modified-hulhe-worker-12"
+  ]
+}

@@ -94,6 +94,7 @@ Detailed configurations, full-precision tables, plots, raw repetitions, memory r
 - [CFR/CFR+ correctness and performance results](results/cfr_cfr_plus/README.md)
 - [MCCFR validation and performance results](results/mccfr/README.md)
 - [Deep CFR validation, performance, and final-policy results](results/deep_cfr/README.md)
+- [Modified-HULHE cloud calibration and worker-scaling results](results/modified_hulhe/README.md)
 - [Final tabular policy results](results/tabular_policies/README.md)
 
 ## Training and policy artefacts
@@ -161,12 +162,7 @@ Modified HULHE begins on the flop with each player contributing one small bet to
 
 The same engine supports conventional HULHE from the pre-flop blinds with four betting levels per round. Modified HULHE is the planned Deep CFR target.
 
-Cloud presets declare `storage_budget_bytes` as the usable persistent-storage ceiling for the
-run. Preflight uses the smaller of this configured budget and the backing filesystem's reported
-free space. Live metrics and checkpoint guards also subtract existing run files from the configured
-budget. The separate backing-filesystem value remains visible because shared filesystems may report
-capacity that is not allocated to the current machine. Memory checks use the effective cgroup limit
-rather than the host's physical-memory total.
+Cloud presets declare `storage_budget_bytes` as the usable persistent-storage ceiling for the run. Preflight uses the smaller of this configured budget and the backing filesystem's reported free space. Live metrics and checkpoint guards also subtract existing run files from the configured budget. The separate backing-filesystem value remains visible because shared filesystems may report capacity that is not allocated to the current machine. Memory checks use the effective cgroup limit rather than the host's physical-memory total.
 
 ## Setup
 

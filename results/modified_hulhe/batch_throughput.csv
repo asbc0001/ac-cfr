@@ -1,0 +1,3 @@
+batch_size,warmup_steps,timed_steps,timed_seconds,updates_per_second,median_gpu_utilisation_percent,gpu_utilisation_source,peak_vram_allocated_bytes,peak_vram_reserved_bytes,reservoir_digest
+10000,50,200,3.1295961919240654,63.90600823074259,52.0,nvidia-smi,256026112,421527552,2bc42c66fb9f8e89fc2f29a978b860c15c03b403fbe8f1b09bb39c67c69f3542
+20000,50,200,5.104088271968067,39.18427529915793,58.0,nvidia-smi,472643072,639631360,2bc42c66fb9f8e89fc2f29a978b860c15c03b403fbe8f1b09bb39c67c69f3542
