@@ -232,6 +232,7 @@ def test_deep_cfr_preflight_checks_resources_without_creating_a_run(
     assert isinstance(traversal_samples, int)
     assert traversal_samples >= 1
     resources = report["resources"]
+    assert isinstance(resources, dict)
     assert resources["filesystem_free_disk_bytes"] == 100_000_000_000
     assert resources["storage_budget_bytes"] == 50_000_000_000
     assert resources["free_disk_bytes"] == 50_000_000_000

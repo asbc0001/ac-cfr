@@ -135,6 +135,24 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
     assert cloud_smoke.runtime.device == "cuda"
     assert cloud_smoke.runtime.storage_budget_bytes == 200_000_000_000
 
+    shakedown = load_deep_cfr_run_config(
+        preset.parents[0] / "modified_hulhe_shakedown.toml",
+        run_id="modified_hulhe_shakedown",
+    )
+    assert shakedown.implementation is DeepCFRImplementationId.OPTIMISED
+    assert shakedown.training.iterations == 3
+    assert shakedown.training.traversals_per_player == 10_000
+    assert shakedown.training.advantage_training_steps == 32_000
+    assert shakedown.training.strategy_training_steps == 16_000
+    assert shakedown.training.advantage_batch_size == 10_000
+    assert shakedown.training.strategy_batch_size == 10_000
+    assert shakedown.training.learning_rate == 0.001
+    assert shakedown.training.max_gradient_norm == 1.0
+    assert shakedown.training.snapshot_iterations == (1, 2, 3)
+    assert shakedown.runtime.device == "cuda"
+    assert shakedown.runtime.traversal_workers == 12
+    assert shakedown.checkpoint_interval == 1
+
 
 def test_deep_cfr_sensitivity_cases_change_one_declared_factor() -> None:
     config_directory = Path(__file__).parents[2] / "configs" / "deep_cfr"
