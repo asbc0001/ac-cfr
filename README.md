@@ -161,6 +161,13 @@ Modified HULHE begins on the flop with each player contributing one small bet to
 
 The same engine supports conventional HULHE from the pre-flop blinds with four betting levels per round. Modified HULHE is the planned Deep CFR target.
 
+Cloud presets declare `storage_budget_bytes` as the usable persistent-storage ceiling for the
+run. Preflight uses the smaller of this configured budget and the backing filesystem's reported
+free space. Live metrics and checkpoint guards also subtract existing run files from the configured
+budget. The separate backing-filesystem value remains visible because shared filesystems may report
+capacity that is not allocated to the current machine. Memory checks use the effective cgroup limit
+rather than the host's physical-memory total.
+
 ## Setup
 
 Python 3.12 or later is required.

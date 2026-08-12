@@ -10,7 +10,7 @@ from ac_cfr.common.environment import effective_cpu_count
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
-_FORMAT_VERSION = 3
+_FORMAT_VERSION = 4
 _RUN_FIELDS = {"implementation", "checkpoint_interval", "checkpoint_retention"}
 _VERSION_TWO_RUN_FIELDS = _RUN_FIELDS - {"checkpoint_retention"}
 _TRAINING_FIELDS = {
@@ -38,8 +38,15 @@ _LEGACY_TRAINING_FIELDS = _TRAINING_FIELDS - {
     "strategy_batch_size",
     "game_configuration_id",
 } | {"training_batch_size"}
-_RUNTIME_FIELDS = {"inference_batch_size", "cpu_threads", "device", "traversal_workers"}
-_VERSION_TWO_RUNTIME_FIELDS = _RUNTIME_FIELDS - {"traversal_workers"}
+_RUNTIME_FIELDS = {
+    "inference_batch_size",
+    "cpu_threads",
+    "device",
+    "traversal_workers",
+    "storage_budget_bytes",
+}
+_VERSION_THREE_RUNTIME_FIELDS = _RUNTIME_FIELDS - {"storage_budget_bytes"}
+_VERSION_TWO_RUNTIME_FIELDS = _VERSION_THREE_RUNTIME_FIELDS - {"traversal_workers"}
 
 
 def load_deep_cfr_run_config(
@@ -58,12 +65,12 @@ def load_deep_cfr_run_config(
     format_version = values["format_version"]
     if isinstance(format_version, bool) or not isinstance(format_version, int):
         raise ValueError("Deep CFR configuration format_version is incompatible")
-    if format_version not in (1, 2, _FORMAT_VERSION):
+    if format_version not in (1, 2, 3, _FORMAT_VERSION):
         raise ValueError("Deep CFR configuration format_version is incompatible")
 
     current_format = format_version == _FORMAT_VERSION
     run = _strict_table(
-        values["run"], _RUN_FIELDS if current_format else _VERSION_TWO_RUN_FIELDS, "run"
+        values["run"], _RUN_FIELDS if format_version >= 3 else _VERSION_TWO_RUN_FIELDS, "run"
     )
     run.setdefault("checkpoint_retention", 2)
     training_fields = _LEGACY_TRAINING_FIELDS if format_version == 1 else _TRAINING_FIELDS
@@ -73,12 +80,16 @@ def load_deep_cfr_run_config(
         training["advantage_batch_size"] = batch_size
         training["strategy_batch_size"] = batch_size
         training["game_configuration_id"] = "leduc"
-    runtime = _strict_table(
-        values["runtime"],
-        _RUNTIME_FIELDS if current_format else _VERSION_TWO_RUNTIME_FIELDS,
-        "runtime",
+    runtime_fields = (
+        _RUNTIME_FIELDS
+        if current_format
+        else _VERSION_THREE_RUNTIME_FIELDS
+        if format_version == 3
+        else _VERSION_TWO_RUNTIME_FIELDS
     )
+    runtime = _strict_table(values["runtime"], runtime_fields, "runtime")
     runtime.setdefault("traversal_workers", 1)
+    runtime.setdefault("storage_budget_bytes", None)
     _apply_overrides(run, training, runtime, overrides or {})
     _resolve_traversal_workers(runtime)
     try:

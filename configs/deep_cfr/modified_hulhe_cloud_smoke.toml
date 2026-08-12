@@ -1,4 +1,4 @@
-format_version = 3
+format_version = 4
 
 # Cheap end-to-end CUDA and persistent-storage check before cloud calibration.
 [run]
@@ -30,5 +30,6 @@ optimizer_id = "adam"
 inference_batch_size = 256
 cpu_threads = 1
 device = "cuda"
-# Resolve once from the cloud machine's available CPU affinity.
+# Resolve once from the cloud machine's effective CPU capacity.
 traversal_workers = 0
+storage_budget_bytes = 200000000000

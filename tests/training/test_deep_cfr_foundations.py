@@ -85,6 +85,7 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
         "cpu_threads": 1,
         "device": "cpu",
         "traversal_workers": 1,
+        "storage_budget_bytes": None,
     }
 
     with pytest.raises(ValueError, match="unknown"):
@@ -120,7 +121,9 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
     assert holdem.training.strategy_reservoir_capacity == 10_000_000
     assert holdem.runtime.device == "cuda"
     assert holdem.runtime.traversal_workers == 10
+    assert holdem.runtime.storage_budget_bytes == 200_000_000_000
     assert holdem.checkpoint_retention == 2
+    assert type(holdem).from_dict(holdem.to_dict()) == holdem
 
     cloud_smoke = load_deep_cfr_run_config(
         preset.parents[0] / "modified_hulhe_cloud_smoke.toml",
@@ -130,6 +133,7 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
     assert cloud_smoke.training.iterations == 2
     assert cloud_smoke.training.traversals_per_player == 100
     assert cloud_smoke.runtime.device == "cuda"
+    assert cloud_smoke.runtime.storage_budget_bytes == 200_000_000_000
 
 
 def test_deep_cfr_sensitivity_cases_change_one_declared_factor() -> None:

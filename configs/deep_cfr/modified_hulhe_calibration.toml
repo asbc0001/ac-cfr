@@ -1,4 +1,4 @@
-format_version = 3
+format_version = 4
 
 # Starting production candidate used by collect-once calibration and the later shakedown.
 # The calibration command independently fits one diagnostic network through 32k updates.
@@ -31,5 +31,6 @@ optimizer_id = "adam"
 inference_batch_size = 1024
 cpu_threads = 1
 device = "cuda"
-# Zero resolves once to the available CPU affinity minus two coordinator/system cores.
+# Zero resolves once from effective CPU capacity while preserving coordinator capacity.
 traversal_workers = 0
+storage_budget_bytes = 200000000000

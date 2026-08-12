@@ -5,11 +5,10 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import psutil
 import torch
 
 from ac_cfr.common.config import GameConfigurationId
-from ac_cfr.common.environment import environment_record
+from ac_cfr.common.environment import effective_memory_bytes, environment_record
 from ac_cfr.games.holdem.engine import HoldemConfig
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import compile_game_tree
@@ -32,8 +31,14 @@ def preflight_deep_cfr(config: DeepCFRRunConfig, runs_root: Path) -> dict[str, o
         pass
 
     estimates = _resource_estimates(config)
-    available_memory = psutil.virtual_memory().available
-    free_disk = shutil.disk_usage(runs_root).free
+    available_memory, _ = effective_memory_bytes()
+    filesystem_free_disk = shutil.disk_usage(runs_root).free
+    storage_budget = config.runtime.storage_budget_bytes
+    free_disk = (
+        filesystem_free_disk
+        if storage_budget is None
+        else min(filesystem_free_disk, storage_budget)
+    )
     if available_memory < estimates["minimum_available_memory_bytes"]:
         raise OSError(
             "insufficient available memory for configured reservoirs: "
@@ -64,6 +69,8 @@ def preflight_deep_cfr(config: DeepCFRRunConfig, runs_root: Path) -> dict[str, o
         "resources": {
             **estimates,
             "available_memory_bytes": available_memory,
+            "filesystem_free_disk_bytes": filesystem_free_disk,
+            "storage_budget_bytes": storage_budget,
             "free_disk_bytes": free_disk,
         },
         "checks": {

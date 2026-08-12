@@ -165,11 +165,14 @@ class DeepCFRRuntimeConfig:
     cpu_threads: int
     device: str
     traversal_workers: int = 1
+    storage_budget_bytes: int | None = None
 
     def __post_init__(self) -> None:
         _validate_positive_integer("inference_batch_size", self.inference_batch_size)
         _validate_positive_integer("cpu_threads", self.cpu_threads)
         _validate_positive_integer("traversal_workers", self.traversal_workers)
+        if self.storage_budget_bytes is not None:
+            _validate_positive_integer("storage_budget_bytes", self.storage_budget_bytes)
         if self.device not in {"cpu", "cuda"}:
             raise ValueError("device must be 'cpu' or 'cuda'")
 
@@ -192,10 +195,18 @@ class DeepCFRRuntimeConfig:
                 "device",
                 "traversal_workers",
             },
+            {
+                "inference_batch_size",
+                "cpu_threads",
+                "device",
+                "traversal_workers",
+                "storage_budget_bytes",
+            },
         ):
             raise ValueError("Deep CFR runtime configuration fields are incompatible")
         parsed = values.copy()
         parsed.setdefault("traversal_workers", 1)
+        parsed.setdefault("storage_budget_bytes", None)
         try:
             return cls(**parsed)
         except (TypeError, ValueError) as error:

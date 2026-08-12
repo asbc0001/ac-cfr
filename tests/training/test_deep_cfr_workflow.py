@@ -1,5 +1,6 @@
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,7 +21,6 @@ from ac_cfr.persistence.deep_cfr_snapshots import (
 from ac_cfr.persistence.registry import load_strategy_registry
 from ac_cfr.persistence.snapshots import file_sha256
 from ac_cfr.solvers import DeepCFR
-from ac_cfr.training import deep_cfr_runner
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_preflight import preflight_deep_cfr
 from ac_cfr.training.deep_cfr_runner import (
@@ -164,8 +164,7 @@ def test_deep_cfr_checkpoint_fails_before_writing_without_free_space(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        deep_cfr_runner.shutil,
-        "disk_usage",
+        "ac_cfr.common.environment.shutil.disk_usage",
         lambda _: SimpleNamespace(free=0),
     )
 
@@ -210,8 +209,19 @@ def test_deep_cfr_stops_safely_and_records_operational_diagnostics(
         ]
 
 
-def test_deep_cfr_preflight_checks_resources_without_creating_a_run(tmp_path: Path) -> None:
-    report = preflight_deep_cfr(_run_config(), tmp_path)
+def test_deep_cfr_preflight_checks_resources_without_creating_a_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = replace(
+        _run_config(),
+        runtime=replace(_run_config().runtime, storage_budget_bytes=50_000_000_000),
+    )
+    monkeypatch.setattr(
+        "ac_cfr.training.deep_cfr_preflight.shutil.disk_usage",
+        lambda _: SimpleNamespace(free=100_000_000_000),
+    )
+    report = preflight_deep_cfr(config, tmp_path)
 
     assert report["status"] == "passed"
     checks = report["checks"]
@@ -221,6 +231,10 @@ def test_deep_cfr_preflight_checks_resources_without_creating_a_run(tmp_path: Pa
     traversal_samples = checks["tiny_traversal_advantage_samples"]
     assert isinstance(traversal_samples, int)
     assert traversal_samples >= 1
+    resources = report["resources"]
+    assert resources["filesystem_free_disk_bytes"] == 100_000_000_000
+    assert resources["storage_budget_bytes"] == 50_000_000_000
+    assert resources["free_disk_bytes"] == 50_000_000_000
     assert not (tmp_path / _run_config().run_id).exists()
 
 

@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -14,7 +13,7 @@ import psutil
 import torch
 
 from ac_cfr.common.config import DeepCFRImplementationId, GameConfigurationId
-from ac_cfr.common.environment import environment_record
+from ac_cfr.common.environment import effective_storage_remaining_bytes, environment_record
 from ac_cfr.common.provenance import code_revision
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import GameId, UtilityUnit
@@ -499,7 +498,10 @@ def _record_iteration_diagnostics(
             "process_rss_bytes": psutil.Process().memory_info().rss,
             "cuda_peak_allocated_bytes": peak_allocated,
             "cuda_peak_reserved_bytes": peak_reserved,
-            "free_disk_bytes": shutil.disk_usage(run_directory).free,
+            "free_disk_bytes": effective_storage_remaining_bytes(
+                run_directory,
+                config.runtime.storage_budget_bytes,
+            ),
         }
     )
 
@@ -566,7 +568,10 @@ def _require_checkpoint_space(directory: Path, solver: NaiveDeepCFR) -> None:
     )
     estimated_bytes = occupied_bytes + network_bytes
     required_bytes = int(estimated_bytes * 1.1) + 64 * 1024 * 1024
-    free_bytes = shutil.disk_usage(directory).free
+    free_bytes = effective_storage_remaining_bytes(
+        directory,
+        solver.runtime.storage_budget_bytes,
+    )
     if free_bytes < required_bytes:
         raise OSError(
             "insufficient free space for an atomic Deep CFR checkpoint: "
