@@ -55,7 +55,10 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
         StrategySample(1, _STATE, _MASK, 3, (0.1, 0.2, 0.7))
 
 
-def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Path) -> None:
+def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     preset = Path(__file__).parents[2] / "configs" / "deep_cfr" / "leduc_baseline.toml"
     config = load_deep_cfr_run_config(
         preset,
@@ -99,6 +102,10 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Pa
     with pytest.raises(ValueError, match="runtime configuration fields"):
         load_deep_cfr_run_config(invalid_preset, run_id="invalid_preset")
 
+    monkeypatch.setattr(
+        "ac_cfr.training.deep_cfr_config.effective_cpu_count",
+        lambda: 13.6,
+    )
     holdem = load_deep_cfr_run_config(
         preset.parents[0] / "modified_hulhe_calibration.toml",
         run_id="modified_hulhe_calibration",
@@ -112,7 +119,7 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(tmp_path: Pa
     assert holdem.training.advantage_reservoir_capacity == 10_000_000
     assert holdem.training.strategy_reservoir_capacity == 10_000_000
     assert holdem.runtime.device == "cuda"
-    assert holdem.runtime.traversal_workers >= 1
+    assert holdem.runtime.traversal_workers == 10
     assert holdem.checkpoint_retention == 2
 
     cloud_smoke = load_deep_cfr_run_config(

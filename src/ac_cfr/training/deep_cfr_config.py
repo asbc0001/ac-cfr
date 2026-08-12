@@ -1,11 +1,12 @@
 """Strict TOML configuration loading for Deep CFR runs."""
 
-import os
+import math
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 
 from ac_cfr.common.config import DeepCFRImplementationId
+from ac_cfr.common.environment import effective_cpu_count
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
@@ -134,10 +135,6 @@ def _resolve_traversal_workers(runtime: dict[str, object]) -> None:
         raise ValueError("traversal_workers must be an integer")
     if workers != 0:
         return
-    try:
-        available_cpus = len(os.sched_getaffinity(0))
-    except AttributeError:
-        available_cpus = os.cpu_count() or 1
-    # The first cloud target is 12--16 CPUs; avoid blindly spawning dozens of
-    # processes on a larger host before traversal scaling has been measured.
-    runtime["traversal_workers"] = min(14, max(1, available_cpus - 2))
+    # Preserve capacity for the coordinator, reservoir admission, and GPU feeding.
+    available_cpus = effective_cpu_count()
+    runtime["traversal_workers"] = min(14, max(1, math.floor(available_cpus * 0.8)))
