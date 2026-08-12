@@ -1,0 +1,70 @@
+{
+  "calibration_contract": {
+    "advantage_batch_size": 10000,
+    "fit_milestones": [
+      4000,
+      8000,
+      16000,
+      32000
+    ],
+    "fresh_network_per_case": true,
+    "learning_rate": 0.001,
+    "single_continuous_optimizer_per_case": true,
+    "training_samples": 27000,
+    "traversals": 10000,
+    "validation_samples": 3000
+  },
+  "cases": [
+    {
+      "best_validation_loss": 1.9675883054733276,
+      "best_validation_update": 32000,
+      "code_revision": "a4035d150e9b74663a4d403db86aa1f6432708b5-dirty",
+      "player": 0,
+      "reservoir_digest": "2bc42c66fb9f8e89fc2f29a978b860c15c03b403fbe8f1b09bb39c67c69f3542",
+      "run_id": "modified-hulhe-calibration",
+      "seed": 20260811
+    },
+    {
+      "best_validation_loss": 2.0387773513793945,
+      "best_validation_update": 16000,
+      "code_revision": "9d98e5e69835e65448667e4771545f4855b47142",
+      "player": 1,
+      "reservoir_digest": "0f3fe3275ce0a622a35f505218d39e56897e83aeb5ba421f8a6c72cbbd344d77",
+      "run_id": "modified-hulhe-generalisation-seed-20260811-player-1",
+      "seed": 20260811
+    },
+    {
+      "best_validation_loss": 1.9645419120788574,
+      "best_validation_update": 32000,
+      "code_revision": "9d98e5e69835e65448667e4771545f4855b47142",
+      "player": 0,
+      "reservoir_digest": "37452fda54505af9e993d6b39199fd41fad2a284d0930eab50374a456ed4d09a",
+      "run_id": "modified-hulhe-generalisation-seed-20260812-player-0",
+      "seed": 20260812
+    },
+    {
+      "best_validation_loss": 1.9235519170761108,
+      "best_validation_update": 32000,
+      "code_revision": "9d98e5e69835e65448667e4771545f4855b47142",
+      "player": 1,
+      "reservoir_digest": "ef8469bf8fbef24f420bb7f93e6af8fb74e2be107059abf1797be0b643a92372",
+      "run_id": "modified-hulhe-generalisation-seed-20260812-player-1",
+      "seed": 20260812
+    }
+  ],
+  "conclusion": {
+    "generalisation_gap_systematic": true,
+    "larger_model_indicated": false,
+    "lower_learning_rate_indicated": false,
+    "policy_evaluation_required": true,
+    "provisional_advantage_updates": 32000,
+    "provisional_k": 10000,
+    "reason": "Held-out loss remained much larger than training loss in all four cases. The fixed split and constant iteration-one weighting do not explain the gap. Policy progression must determine whether more diverse traversal data is needed."
+  },
+  "method": {
+    "split": "One deterministic seeded permutation produced disjoint fixed training and validation indices for each reservoir.",
+    "training_access": "Optimisation sampled only training indices; validation used only held-out indices under inference mode.",
+    "weighting": "All samples were collected and fitted at outer iteration 1, so the linear CFR weight was the same constant value for every sample."
+  },
+  "schema_version": 1
+}

@@ -16,6 +16,7 @@ class RngStream(StrEnum):
 
     CHANCE = "chance"
     POLICY = "policy"
+    BOOTSTRAP = "bootstrap"
     RESERVOIR = "reservoir"
     NETWORK = "network"
     NETWORK_TRAINING = "network_training"

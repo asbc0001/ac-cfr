@@ -2,9 +2,14 @@
 
 import argparse
 import csv
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from ac_cfr.evaluation.hulhe_plotting import (
+    plot_modified_hulhe_generalisation,
+    plot_modified_hulhe_h2h,
+)
 from ac_cfr.evaluation.plotting import (
     plot_exact_metric,
     plot_exploitability_comparison,
@@ -14,6 +19,13 @@ from ac_cfr.evaluation.plotting import (
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Generate one plot from run directories or result files."""
+    arguments_list = list(sys.argv[1:] if argv is None else argv)
+    if arguments_list[:1] in (
+        ["modified-hulhe-generalisation"],
+        ["modified-hulhe-h2h"],
+    ):
+        return _plot_modified_hulhe(arguments_list[0], arguments_list[1:])
+
     parser = argparse.ArgumentParser(description="Plot exact strategy metrics from result CSVs.")
     parser.add_argument("inputs", type=Path, nargs="+", metavar="RUN_OR_RESULTS")
     parser.add_argument("--output", type=Path)
@@ -26,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=("iteration", "elapsed_training_seconds"),
         default="iteration",
     )
-    arguments = parser.parse_args(argv)
+    arguments = parser.parse_args(arguments_list)
     result_paths = tuple(
         input_path / "metrics.csv" if input_path.is_dir() else input_path
         for input_path in arguments.inputs
@@ -89,3 +101,17 @@ def _comparison_filename(result_paths: tuple[Path, ...], *, plot_name: str) -> s
             raise ValueError(f"results file contains no run IDs: {result_path}")
         run_ids.extend(sorted(file_run_ids))
     return f"{plot_name}__{'__'.join(dict.fromkeys(run_ids))}.png"
+
+
+def _plot_modified_hulhe(mode: str, argv: list[str]) -> int:
+    """Generate one modified-HULHE diagnostic or policy-progression plot."""
+    parser = argparse.ArgumentParser(description="Plot modified-HULHE compact results.")
+    parser.add_argument("results", type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    arguments = parser.parse_args(argv)
+    if mode == "modified-hulhe-generalisation":
+        plot_modified_hulhe_generalisation(arguments.results, arguments.output)
+    else:
+        plot_modified_hulhe_h2h(arguments.results, arguments.output)
+    print(f"plot: {arguments.output}")
+    return 0

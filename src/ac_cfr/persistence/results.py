@@ -1,6 +1,7 @@
 """Compact, resume-safe CSV records for training and exact evaluation."""
 
 import csv
+from math import isfinite
 from pathlib import Path
 from typing import Final
 
@@ -104,6 +105,41 @@ EVALUATION_RESULT_KEY_FIELDS: Final = (
     "seed",
 )
 
+HULHE_H2H_RESULT_FIELDS: Final = (
+    "game",
+    "game_version",
+    "utility_unit",
+    "solver",
+    "run_id",
+    "strategy_snapshot_id",
+    "source_checkpoint_id",
+    "iteration",
+    "seed",
+    "opponent_id",
+    "opponent_snapshot_id",
+    "opponent_iteration",
+    "hands",
+    "paired_deals",
+    "mbb_per_game",
+    "confidence_level",
+    "confidence_interval_method",
+    "confidence_interval_low",
+    "confidence_interval_high",
+    "bootstrap_resamples",
+)
+HULHE_H2H_RESULT_KEY_FIELDS: Final = (
+    "run_id",
+    "strategy_snapshot_id",
+    "iteration",
+    "opponent_id",
+    "opponent_snapshot_id",
+    "seed",
+    "paired_deals",
+    "confidence_level",
+    "confidence_interval_method",
+    "bootstrap_resamples",
+)
+
 # Wider files from the first reporting implementation are projected onto the relevant schema.
 LEGACY_RESULT_FIELDS: Final = (
     *TRAINING_METRIC_FIELDS,
@@ -169,6 +205,32 @@ class EvaluationResultStore:
 
     def upsert(self, values: dict[str, object]) -> None:
         """Insert or replace one exact-evaluation result."""
+        self._store.upsert(values)
+
+
+class HoldemH2HResultStore:
+    """Store reproducible modified-HULHE duplicate-deal results."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, path: Path) -> None:
+        self._store = _CsvRecordStore(
+            path,
+            fields=HULHE_H2H_RESULT_FIELDS,
+            key_fields=HULHE_H2H_RESULT_KEY_FIELDS,
+        )
+        for record in self._store.records:
+            _validate_hulhe_h2h_record(record)
+
+    @property
+    def records(self) -> tuple[ResultRecord, ...]:
+        """Return independent copies of the current records."""
+        return self._store.records
+
+    def upsert(self, values: dict[str, object]) -> None:
+        """Validate and atomically insert or replace one H2H measurement."""
+        record = self._store._normalise(values)
+        _validate_hulhe_h2h_record(record)
         self._store.upsert(values)
 
 
@@ -342,6 +404,31 @@ def _record_sort_key(record: ResultRecord) -> tuple[str | int, ...]:
         record["strategy_snapshot_id"],
         int(record["seed"]),
     )
+
+
+def _validate_hulhe_h2h_record(record: ResultRecord) -> None:
+    """Validate the modified-HULHE result fields beyond their stable key."""
+    if record["game"] != "holdem" or record["game_version"] != "modified_hulhe":
+        raise ValueError("H2H result must describe modified HULHE")
+    if not record["opponent_id"] or not record["confidence_interval_method"]:
+        raise ValueError("H2H result is missing opponent or interval metadata")
+    try:
+        opponent_iteration = int(record["opponent_iteration"])
+        hands = int(record["hands"])
+        paired_deals = int(record["paired_deals"])
+        bootstrap_resamples = int(record["bootstrap_resamples"])
+        estimate = float(record["mbb_per_game"])
+        confidence_level = float(record["confidence_level"])
+        interval_low = float(record["confidence_interval_low"])
+        interval_high = float(record["confidence_interval_high"])
+    except ValueError as error:
+        raise ValueError("H2H result contains invalid numeric values") from error
+    if opponent_iteration < 0 or paired_deals < 2 or hands != 2 * paired_deals:
+        raise ValueError("H2H result contains invalid hand or iteration counts")
+    if bootstrap_resamples < 2 or not 0.0 < confidence_level < 1.0:
+        raise ValueError("H2H result contains invalid bootstrap settings")
+    if not all(map(isfinite, (estimate, interval_low, interval_high))):
+        raise ValueError("H2H result values must be finite")
 
 
 def _stringify(value: object) -> str:
