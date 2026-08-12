@@ -1,0 +1,40 @@
+{
+  "code_revision": "b32a50b9539bf2fcca88c6148b38e4576cd18a2f",
+  "run_config": {
+    "checkpoint_interval": 1,
+    "checkpoint_retention": 2,
+    "implementation": "optimised",
+    "run_id": "modified-hulhe-shakedown",
+    "runtime": {
+      "cpu_threads": 1,
+      "device": "cuda",
+      "inference_batch_size": 1024,
+      "storage_budget_bytes": 200000000000,
+      "traversal_workers": 12
+    },
+    "training": {
+      "advantage_batch_size": 10000,
+      "advantage_reservoir_capacity": 10000000,
+      "advantage_training_steps": 32000,
+      "dropout_probability": 0.0,
+      "game_configuration_id": "modified_hulhe",
+      "iterations": 3,
+      "learning_rate": 0.001,
+      "max_gradient_norm": 1.0,
+      "model_config_id": "modified_hulhe_deep_cfr",
+      "optimizer_id": "adam",
+      "seed": 20260811,
+      "snapshot_iterations": [
+        1,
+        2,
+        3
+      ],
+      "state_encoding_id": "holdem",
+      "strategy_batch_size": 10000,
+      "strategy_reservoir_capacity": 10000000,
+      "strategy_training_steps": 16000,
+      "traversals_per_player": 10000,
+      "validation_fraction": 0.1
+    }
+  }
+}

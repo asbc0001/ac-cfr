@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ac_cfr.cli.evaluate_hulhe import main as holdem_h2h_main
+from ac_cfr.cli.watch_hulhe import main as holdem_watch_main
 from ac_cfr.evaluation.metrics import evaluate_strategy
 from ac_cfr.games.base import UtilityUnit
 from ac_cfr.persistence.registry import load_strategy_registry
@@ -17,6 +18,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["modified-hulhe"]:
         return holdem_h2h_main(arguments[1:])
+    if arguments[:1] == ["modified-hulhe-watch"]:
+        return holdem_watch_main(arguments[1:])
 
     parser = argparse.ArgumentParser(description="Evaluate a registered Kuhn or Leduc strategy.")
     parser.add_argument("strategy_id")
