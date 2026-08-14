@@ -27,6 +27,8 @@ from ac_cfr.solvers.naive_deep_cfr import (
     _LossMetrics,
     _network_seed_index,
     _train_network_tensors,
+    exploratory_opponent_probabilities,
+    opponent_importance_ratio,
 )
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import PackedAdvantageReservoir, PackedStrategyReservoir
@@ -220,6 +222,7 @@ class DeepCFR(NaiveDeepCFR):
             "state_size": architecture.input_size,
             "action_count": architecture.output_size,
             "state_dtype": state_dtype,
+            "store_sampling_weights": config.opponent_exploration_epsilon > 0.0,
         }
         self._packed_advantage_reservoirs = (
             PackedAdvantageReservoir(
@@ -268,6 +271,10 @@ class DeepCFR(NaiveDeepCFR):
         self._traversal_seconds = 0.0
         self._advantage_training_seconds = 0.0
         self._strategy_training_seconds = 0.0
+        self._importance_ratios = []
+        self._sample_weights = []
+        self._raw_information_sets = set()
+        self._weighted_information_sets = set()
 
     @property
     def holdem_configuration(self) -> HoldemConfig | None:
@@ -361,6 +368,7 @@ class DeepCFR(NaiveDeepCFR):
                             iteration=iteration,
                             sampled_opponent_actions={},
                             randomness=randomness,
+                            sampling_weight=1.0,
                         )
                     )
                 else:
@@ -493,6 +501,7 @@ class DeepCFR(NaiveDeepCFR):
         iteration: int,
         sampled_opponent_actions: dict[int, int],
         randomness: _TraversalRandomness,
+        sampling_weight: float,
     ) -> _Traversal:
         """Yield inference requests while applying external-sampling traversal rules."""
         tree = self.tree
@@ -513,6 +522,7 @@ class DeepCFR(NaiveDeepCFR):
                     iteration=iteration,
                     sampled_opponent_actions=sampled_opponent_actions,
                     randomness=randomness,
+                    sampling_weight=sampling_weight,
                 )
             )
 
@@ -523,28 +533,48 @@ class DeepCFR(NaiveDeepCFR):
         action_mask = self._neural_data.action_masks[information_set_id]
         strategy = yield _InferenceRequest(neural_state, action_mask, acting_player)
         if acting_player != traverser:
+            # The current action has not been sampled yet, so strategy memory uses
+            # the true strategy with only the accumulated prefix correction.
             self._packed_strategy_reservoir.add_values(
                 acting_player,
                 self._neural_data.states[information_set_id],
                 self._neural_data.action_masks[information_set_id],
                 iteration,
                 strategy,
+                sampling_weight,
             )
+            self._record_sample(information_set_id, sampling_weight)
+            local_probabilities = strategy[tree.edge_labels[edge_start : edge_start + edge_count]]
             action_position = sampled_opponent_actions.get(information_set_id)
             if action_position is None:
-                local_probabilities = strategy[
-                    tree.edge_labels[edge_start : edge_start + edge_count]
-                ]
-                action_position = _sample_position(local_probabilities, randomness.policy)
-                sampled_opponent_actions[information_set_id] = action_position
-            return (
-                yield from self._traverse_batched(
-                    node_id=int(tree.children[edge_start + action_position]),
-                    traverser=traverser,
-                    iteration=iteration,
-                    sampled_opponent_actions=sampled_opponent_actions,
-                    randomness=randomness,
+                behaviour_probabilities = exploratory_opponent_probabilities(
+                    local_probabilities,
+                    self.config.opponent_exploration_epsilon,
                 )
+                action_position = _sample_position(
+                    np.asarray(behaviour_probabilities), randomness.policy
+                )
+                sampled_opponent_actions[information_set_id] = action_position
+            ratio = opponent_importance_ratio(
+                local_probabilities,
+                action_position,
+                self.config.opponent_exploration_epsilon,
+            )
+            self._record_importance_ratio(ratio)
+            # Use the local ratio for both descendant visitation and the sampled
+            # return, matching the independently validated reference traversal.
+            child_value = yield from self._traverse_batched(
+                node_id=int(tree.children[edge_start + action_position]),
+                traverser=traverser,
+                iteration=iteration,
+                sampled_opponent_actions=sampled_opponent_actions,
+                randomness=randomness,
+                sampling_weight=sampling_weight * ratio,
+            )
+            return (
+                child_value
+                if self.config.opponent_exploration_epsilon == 0.0
+                else ratio * child_value
             )
 
         action_values: list[float] = []
@@ -555,6 +585,7 @@ class DeepCFR(NaiveDeepCFR):
                 iteration=iteration,
                 sampled_opponent_actions=sampled_opponent_actions,
                 randomness=randomness,
+                sampling_weight=sampling_weight,
             )
             action_values.append(action_value)
         local_strategy = strategy[tree.edge_labels[edge_start : edge_start + edge_count]]
@@ -566,12 +597,16 @@ class DeepCFR(NaiveDeepCFR):
         for action_position, action_value in enumerate(action_values):
             action = int(tree.edge_labels[edge_start + action_position])
             advantages[action] = action_value - node_value
+        # Suffix ratios are already present in the targets; the stored weight
+        # corrects only the probability of reaching this information set.
         self._packed_advantage_reservoirs[traverser].add_values(
             self._neural_data.states[information_set_id],
             self._neural_data.action_masks[information_set_id],
             iteration,
             advantages,
+            sampling_weight,
         )
+        self._record_sample(information_set_id, sampling_weight)
         return node_value
 
     def _predict_advantages(self, information_set_id: int, player: int) -> tuple[float, ...]:
@@ -601,6 +636,7 @@ class DeepCFR(NaiveDeepCFR):
             masks,
             sample_iterations,
             advantages,
+            self._packed_advantage_reservoirs[player].sampling_weights,
             iteration,
             seed_index,
             training_steps=self.config.advantage_training_steps,
@@ -630,6 +666,7 @@ class DeepCFR(NaiveDeepCFR):
             masks,
             sample_iterations,
             strategies,
+            self._packed_strategy_reservoir.sampling_weights,
             iteration,
             seed_index,
             training_steps=self.config.strategy_training_steps,
@@ -658,6 +695,7 @@ class DeepCFR(NaiveDeepCFR):
         masks: NDArray[np.bool],
         sample_iterations: NDArray[np.uint32],
         targets: NDArray[np.float32],
+        sampling_weights: NDArray[np.float32] | None,
         iteration: int,
         seed_index: int,
         *,
@@ -671,6 +709,9 @@ class DeepCFR(NaiveDeepCFR):
             action_masks=torch.from_numpy(masks),
             targets=torch.from_numpy(targets),
             sample_iterations=torch.from_numpy(sample_iterations.astype(np.float32)),
+            sampling_weights=(
+                None if sampling_weights is None else torch.from_numpy(sampling_weights)
+            ),
             current_iteration=iteration,
             training_steps=training_steps,
             batch_size=(

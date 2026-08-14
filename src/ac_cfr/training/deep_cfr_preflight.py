@@ -94,7 +94,8 @@ def _resource_estimates(config: DeepCFRRunConfig) -> dict[str, int]:
         2 if config.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE else 4
     )
     state_bytes = network_config.input_size * state_item_bytes
-    common_sample_bytes = state_bytes + action_count + _ITERATION_BYTES
+    sampling_weight_bytes = 4 if config.training.opponent_exploration_epsilon > 0.0 else 0
+    common_sample_bytes = state_bytes + action_count + _ITERATION_BYTES + sampling_weight_bytes
     advantage_sample_bytes = common_sample_bytes + action_count * 4
     strategy_sample_bytes = advantage_sample_bytes + 1
     reservoir_bytes = (

@@ -31,6 +31,7 @@ def _config() -> DeepCFRTrainingConfig:
         dropout_probability=0.0,
         seed=2026,
         snapshot_iterations=(1,),
+        opponent_exploration_epsilon=0.1,
     )
 
 
@@ -118,6 +119,7 @@ def test_interrupted_deep_cfr_resume_matches_uninterrupted_training(tmp_path: Pa
     resumed.train(1)
 
     assert loaded.metadata["optimizer_state_required"] is False
+    assert loaded.metadata["reservoir_schema_version"] == 2
     assert resumed.runtime == _runtime()
     assert resumed.iteration == uninterrupted.iteration == 2
     assert resumed.training_metrics == uninterrupted.training_metrics

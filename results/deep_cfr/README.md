@@ -9,6 +9,7 @@ This directory records the correctness, configuration, convergence, profiling, b
 - **Training lifecycle validation:** PASS
 - **Final Leduc policy:** COMPLETE
 - **Leduc lifecycle gate:** PASS
+- **Exploratory opponent-sampling experiment:** ESTIMATORS PASS; TRAINING GATE FAIL
 
 ## Scope
 
@@ -128,6 +129,39 @@ The validated Leduc trainer uses one worker process. Its three-repeat fixed benc
 
 Profiling supports the timing result: batching reduces network calls from 30,315 to 365, packed handling reduces Python-visible calls from 19.3 million to 1.5 million, and optimised traversal uses about 0.6 profiled seconds versus 6.3 seconds for recursive reference traversal. Profiled times themselves are diagnostic because instrumentation changes execution speed.
 
+## Exploratory opponent-sampling experiment
+
+A Leduc-only experiment sampled opponent actions from
+`q = 0.9 sigma + 0.1 uniform` while leaving chance sampling and traverser expansion
+unchanged. Suffix `sigma/q` ratios correct sampled returns; prefix ratios become
+training weights for advantage and strategy-memory samples. Strategy memory still
+stores the true `sigma`, and uniform reservoir admission is unchanged. The default
+`epsilon = 0` path retains the original sampler and storage schema.
+
+The independent 100,000-sample full-tree gate passed. Reach-weighted RMSE was
+`0.1094` for advantage estimates and `0.00244` for strategy-memory estimates, all
+1,872 expected information sets were observed, the maximum local importance ratio
+was `1.0345`, and effective sample size was 99.78% of the weighted sample count.
+
+The subsequent matched three-seed, 20-iteration comparison did not pass its training
+gate:
+
+| Seed | Baseline exploitability | Exploratory exploitability | Improved |
+|---:|---:|---:|---|
+| 20260811 | 1.0711 | 1.0914 | No |
+| 20260812 | 1.1611 | 1.2812 | No |
+| 20260813 | 1.1077 | 1.0725 | Yes |
+
+Median final exploitability improved slightly from `1.1077` to `1.0914`, but only
+one paired seed improved, below the declared two-seed majority requirement. Raw
+coverage also exceeded positive-weight coverage because actions assigned exactly
+zero probability by `sigma` receive zero importance weight when exploration samples
+them. The implementation therefore remains an isolated experimental option; it was
+not applied to modified HULHE and provides no justification for a HULHE run.
+
+Detailed estimator, per-seed, milestone, and gate evidence is in
+[`exploratory_sampling/`](exploratory_sampling/).
+
 ## Reproducibility
 
 Reference runs exported independently loadable policies at iterations 1, 5 and 10. Their checkpoints contain networks, reservoirs, random-number-generator states, resolved configuration, elapsed training time and metrics required for compatible resume.
@@ -142,5 +176,6 @@ Reference runs exported independently loadable policies at iterations 1, 5 and 1
 - `final_policy.json`, `final_policy_convergence.csv`, and `plots/final_policy_convergence.png` contain final-run provenance, every evaluated milestone, and the resulting convergence plot.
 - `traversal_scaling.json` records the single-process preliminary scaling baseline and its limits.
 - `lifecycle_gate.json` records the final Leduc lifecycle completeness checks.
+- `exploratory_sampling/` contains the importance-corrected sampling estimator and matched training gate.
 
 Large checkpoints and neural snapshots remain under ignored `runs/` directories.

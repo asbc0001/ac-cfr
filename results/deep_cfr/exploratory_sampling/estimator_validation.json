@@ -1,0 +1,49 @@
+{
+  "about": "Full-tree versus importance-corrected sampled advantage and strategy-memory estimates on Leduc.",
+  "checks": [
+    {
+      "limit": 0.15,
+      "name": "corrected_advantage_estimates_match_full_tree",
+      "passed": true,
+      "value": 0.10938421271977224
+    },
+    {
+      "limit": 0.005,
+      "name": "corrected_strategy_memory_matches_full_tree",
+      "passed": true,
+      "value": 0.0024411943842011776
+    },
+    {
+      "expected": 1872,
+      "name": "all_reachable_information_sets_observed",
+      "observed": 1872,
+      "passed": true
+    },
+    {
+      "limit": 1.1111111111111112,
+      "name": "importance_ratios_bounded",
+      "passed": true,
+      "value": 1.0344827586206897
+    },
+    {
+      "minimum": 0.8,
+      "name": "effective_sample_fraction_healthy",
+      "passed": true,
+      "value": 0.9978124985589439
+    }
+  ],
+  "measurements": {
+    "advantage_reach_weighted_rmse": 0.10938421271977224,
+    "effective_sample_fraction": 0.9978124985589439,
+    "effective_sample_size": 3210319.026926108,
+    "epsilon": 0.1,
+    "expected_information_sets": 1872,
+    "maximum_importance_ratio": 1.0344827586206897,
+    "observed_information_sets": 1872,
+    "sample_count": 100000,
+    "seed": 20260814,
+    "strategy_reach_weighted_rmse": 0.0024411943842011776,
+    "weighted_sample_count": 3217357
+  },
+  "passed": true
+}

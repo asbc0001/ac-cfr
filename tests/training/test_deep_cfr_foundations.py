@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from ac_cfr.training.config import DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_config import load_deep_cfr_run_config
 from ac_cfr.training.reservoirs import (
     DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
+    DEEP_CFR_WEIGHTED_RESERVOIR_SCHEMA_VERSION,
     AdvantageSample,
     StrategySample,
 )
@@ -46,14 +48,20 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
     assert config.state_encoding_id is StateEncodingId.LEDUC_NEURAL
     assert config.validation_fraction == 0.1
     assert config.validation_split_id == "sample"
+    assert config.opponent_exploration_epsilon == 0.0
     assert config.max_gradient_norm == 10.0
     assert config.dropout_probability == 0.0
     assert config.to_dict()["snapshot_iterations"] == [25, 100]
     assert advantage_sample.iteration == strategy_sample.iteration == 3
     assert DEEP_CFR_RESERVOIR_SCHEMA_VERSION == 1
+    assert DEEP_CFR_WEIGHTED_RESERVOIR_SCHEMA_VERSION == 2
 
     with pytest.raises(ValueError, match="illegal-action"):
         StrategySample(1, _STATE, _MASK, 3, (0.1, 0.2, 0.7))
+
+    legacy_values = config.to_dict()
+    del legacy_values["opponent_exploration_epsilon"]
+    assert DeepCFRTrainingConfig.from_dict(legacy_values) == config
 
 
 def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
@@ -88,6 +96,23 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
         "traversal_workers": 1,
         "storage_budget_bytes": None,
     }
+
+    exploratory = load_deep_cfr_run_config(
+        preset.parents[0] / "leduc_exploratory_sampling.toml",
+        run_id="leduc_exploratory_sampling",
+    )
+    assert exploratory.training.opponent_exploration_epsilon == 0.1
+    assert exploratory.checkpoint_interval == 1
+    assert exploratory.training.snapshot_iterations == (5, 10, 15)
+
+    baseline_control = load_deep_cfr_run_config(
+        preset.parents[0] / "leduc_exploration_baseline.toml",
+        run_id="leduc_exploration_baseline",
+    )
+    assert baseline_control.training.opponent_exploration_epsilon == 0.0
+    assert baseline_control.training.to_dict() | {"opponent_exploration_epsilon": 0.1} == (
+        exploratory.training.to_dict()
+    )
 
     with pytest.raises(ValueError, match="unknown"):
         load_deep_cfr_run_config(
@@ -126,6 +151,8 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
     assert holdem.runtime.storage_budget_bytes == 200_000_000_000
     assert holdem.checkpoint_retention == 2
     assert type(holdem).from_dict(holdem.to_dict()) == holdem
+    with pytest.raises(ValueError, match="only for Leduc"):
+        replace(holdem.training, opponent_exploration_epsilon=0.1)
 
     cloud_smoke = load_deep_cfr_run_config(
         preset.parents[0] / "modified_hulhe_cloud_smoke.toml",

@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from ac_cfr.games.leduc_neural import LEDUC_ACTION_COUNT, LEDUC_NEURAL_STATE_SIZE
 
 DEEP_CFR_RESERVOIR_SCHEMA_VERSION = 1
+DEEP_CFR_WEIGHTED_RESERVOIR_SCHEMA_VERSION = 2
 
 NeuralState = tuple[float, ...]
 ActionMask = tuple[bool, ...]
@@ -110,6 +111,7 @@ class PackedAdvantageReservoir:
         state_size: int = LEDUC_NEURAL_STATE_SIZE,
         action_count: int = LEDUC_ACTION_COUNT,
         state_dtype: np.dtype[np.floating] = _DEFAULT_PACKED_STATE_DTYPE,
+        store_sampling_weights: bool = False,
     ) -> None:
         _validate_packed_reservoir_arguments(capacity, rng)
         _validate_packed_layout(state_size, action_count, state_dtype)
@@ -121,6 +123,9 @@ class PackedAdvantageReservoir:
         self._action_masks = np.empty((capacity, action_count), dtype=np.bool)
         self._iterations = np.empty(capacity, dtype=np.uint32)
         self._advantages = np.empty((capacity, action_count), dtype=np.float32)
+        self._sampling_weights = (
+            np.empty(capacity, dtype=np.float32) if store_sampling_weights else None
+        )
 
     @property
     def capacity(self) -> int:
@@ -135,14 +140,14 @@ class PackedAdvantageReservoir:
     @property
     def resident_bytes(self) -> int:
         """Return bytes allocated by the packed sample arrays."""
-        return sum(
-            values.nbytes
-            for values in (
-                self._states,
-                self._action_masks,
-                self._iterations,
-                self._advantages,
-            )
+        arrays = (
+            self._states,
+            self._action_masks,
+            self._iterations,
+            self._advantages,
+        )
+        return sum(values.nbytes for values in arrays) + (
+            0 if self._sampling_weights is None else self._sampling_weights.nbytes
         )
 
     @property
@@ -178,18 +183,29 @@ class PackedAdvantageReservoir:
         )
 
     @property
+    def sampling_weights(self) -> NDArray[np.float32] | None:
+        """Return occupied visitation weights when weighted storage is enabled."""
+        if self._sampling_weights is None:
+            return None
+        return self._sampling_weights[: self._size]
+
+    @property
     def samples(self) -> tuple[AdvantageSample, ...]:
         """Materialise compatible samples for checkpoints and inspection."""
         states, masks, iterations, advantages = self.arrays
+        sampling_weights = self.sampling_weights
         return tuple(
             AdvantageSample(
                 state=tuple(float(value) for value in state),
                 action_mask=tuple(bool(value) for value in mask),
                 iteration=int(iteration),
                 advantages=tuple(float(value) for value in values),
+                sampling_weight=(
+                    1.0 if sampling_weights is None else float(sampling_weights[index])
+                ),
             )
-            for state, mask, iteration, values in zip(
-                states, masks, iterations, advantages, strict=True
+            for index, (state, mask, iteration, values) in enumerate(
+                zip(states, masks, iterations, advantages, strict=True)
             )
         )
 
@@ -200,7 +216,13 @@ class PackedAdvantageReservoir:
         """Admit one validated sample using uniform reservoir replacement."""
         if not isinstance(sample, AdvantageSample):
             raise TypeError("sample must be an AdvantageSample")
-        self.add_values(sample.state, sample.action_mask, sample.iteration, sample.advantages)
+        self.add_values(
+            sample.state,
+            sample.action_mask,
+            sample.iteration,
+            sample.advantages,
+            sample.sampling_weight,
+        )
 
     def add_values(
         self,
@@ -208,9 +230,13 @@ class PackedAdvantageReservoir:
         action_mask: ActionMask | NDArray[np.bool],
         iteration: int,
         advantages: ActionValues | NDArray[np.float32] | NDArray[np.float64],
+        sampling_weight: float = 1.0,
     ) -> None:
         """Admit prevalidated traversal values without constructing an object."""
         _validate_packed_iteration(iteration)
+        _validate_sampling_weight(sampling_weight)
+        if self._sampling_weights is None and sampling_weight != 1.0:
+            raise ValueError("weighted samples require weighted reservoir storage")
         index = self._admission_index()
         if index is None:
             return
@@ -218,6 +244,8 @@ class PackedAdvantageReservoir:
         self._action_masks[index] = action_mask
         self._iterations[index] = iteration
         self._advantages[index] = advantages
+        if self._sampling_weights is not None:
+            self._sampling_weights[index] = sampling_weight
 
     def training_state(self) -> dict[str, object]:
         """Return occupancy and random state needed for exact continuation."""
@@ -246,6 +274,8 @@ class PackedAdvantageReservoir:
             self._action_masks[index] = sample.action_mask
             self._iterations[index] = sample.iteration
             self._advantages[index] = sample.advantages
+            if self._sampling_weights is not None:
+                self._sampling_weights[index] = sample.sampling_weight
 
     def restore_arrays(
         self,
@@ -254,6 +284,7 @@ class PackedAdvantageReservoir:
         action_masks: NDArray[np.bool],
         iterations: NDArray[np.uint32],
         advantages: NDArray[np.float32],
+        sampling_weights: NDArray[np.float32] | None = None,
         samples_seen: int,
         rng_state: object,
     ) -> None:
@@ -270,12 +301,15 @@ class PackedAdvantageReservoir:
             action_count=self.action_count,
             rng_state=rng_state,
             normalised=False,
+            sampling_weights=sampling_weights,
+            expects_sampling_weights=self._sampling_weights is not None,
         )
         self._restore_array_values(
             states,
             action_masks,
             iterations,
             advantages,
+            sampling_weights,
             samples_seen,
             restored_rng,
         )
@@ -286,6 +320,7 @@ class PackedAdvantageReservoir:
         action_masks: NDArray[np.bool],
         iterations: NDArray[np.uint32],
         advantages: NDArray[np.float32],
+        sampling_weights: NDArray[np.float32] | None,
         samples_seen: int,
         rng: Random,
     ) -> None:
@@ -294,6 +329,9 @@ class PackedAdvantageReservoir:
         self._action_masks[:size] = action_masks
         self._iterations[:size] = iterations
         self._advantages[:size] = advantages
+        if self._sampling_weights is not None:
+            assert sampling_weights is not None
+            self._sampling_weights[:size] = sampling_weights
         self._size = size
         self._samples_seen = samples_seen
         self._rng = rng
@@ -319,6 +357,7 @@ class PackedStrategyReservoir:
         state_size: int = LEDUC_NEURAL_STATE_SIZE,
         action_count: int = LEDUC_ACTION_COUNT,
         state_dtype: np.dtype[np.floating] = _DEFAULT_PACKED_STATE_DTYPE,
+        store_sampling_weights: bool = False,
     ) -> None:
         _validate_packed_reservoir_arguments(capacity, rng)
         _validate_packed_layout(state_size, action_count, state_dtype)
@@ -331,6 +370,9 @@ class PackedStrategyReservoir:
         self._action_masks = np.empty((capacity, action_count), dtype=np.bool)
         self._iterations = np.empty(capacity, dtype=np.uint32)
         self._strategies = np.empty((capacity, action_count), dtype=np.float32)
+        self._sampling_weights = (
+            np.empty(capacity, dtype=np.float32) if store_sampling_weights else None
+        )
 
     @property
     def capacity(self) -> int:
@@ -345,15 +387,15 @@ class PackedStrategyReservoir:
     @property
     def resident_bytes(self) -> int:
         """Return bytes allocated by the packed sample arrays."""
-        return sum(
-            values.nbytes
-            for values in (
-                self._players,
-                self._states,
-                self._action_masks,
-                self._iterations,
-                self._strategies,
-            )
+        arrays = (
+            self._players,
+            self._states,
+            self._action_masks,
+            self._iterations,
+            self._strategies,
+        )
+        return sum(values.nbytes for values in arrays) + (
+            0 if self._sampling_weights is None else self._sampling_weights.nbytes
         )
 
     @property
@@ -391,9 +433,17 @@ class PackedStrategyReservoir:
         )
 
     @property
+    def sampling_weights(self) -> NDArray[np.float32] | None:
+        """Return occupied visitation weights when weighted storage is enabled."""
+        if self._sampling_weights is None:
+            return None
+        return self._sampling_weights[: self._size]
+
+    @property
     def samples(self) -> tuple[StrategySample, ...]:
         """Materialise compatible samples for checkpoints and inspection."""
         players, states, masks, iterations, strategies = self.arrays
+        sampling_weights = self.sampling_weights
         return tuple(
             StrategySample(
                 player=int(player),
@@ -401,9 +451,12 @@ class PackedStrategyReservoir:
                 action_mask=tuple(bool(value) for value in mask),
                 iteration=int(iteration),
                 strategy=_normalised_strategy_tuple(values, mask),
+                sampling_weight=(
+                    1.0 if sampling_weights is None else float(sampling_weights[index])
+                ),
             )
-            for player, state, mask, iteration, values in zip(
-                players, states, masks, iterations, strategies, strict=True
+            for index, (player, state, mask, iteration, values) in enumerate(
+                zip(players, states, masks, iterations, strategies, strict=True)
             )
         )
 
@@ -420,6 +473,7 @@ class PackedStrategyReservoir:
             sample.action_mask,
             sample.iteration,
             sample.strategy,
+            sample.sampling_weight,
         )
 
     def add_values(
@@ -429,11 +483,15 @@ class PackedStrategyReservoir:
         action_mask: ActionMask | NDArray[np.bool],
         iteration: int,
         strategy: ActionValues | NDArray[np.float32] | NDArray[np.float64],
+        sampling_weight: float = 1.0,
     ) -> None:
         """Admit prevalidated traversal values without constructing an object."""
         if player not in (0, 1):
             raise ValueError("player must be 0 or 1")
         _validate_packed_iteration(iteration)
+        _validate_sampling_weight(sampling_weight)
+        if self._sampling_weights is None and sampling_weight != 1.0:
+            raise ValueError("weighted samples require weighted reservoir storage")
         index = self._admission_index()
         if index is None:
             return
@@ -442,6 +500,8 @@ class PackedStrategyReservoir:
         self._action_masks[index] = action_mask
         self._iterations[index] = iteration
         self._strategies[index] = strategy
+        if self._sampling_weights is not None:
+            self._sampling_weights[index] = sampling_weight
 
     def training_state(self) -> dict[str, object]:
         """Return occupancy and random state needed for exact continuation."""
@@ -471,6 +531,8 @@ class PackedStrategyReservoir:
             self._action_masks[index] = sample.action_mask
             self._iterations[index] = sample.iteration
             self._strategies[index] = sample.strategy
+            if self._sampling_weights is not None:
+                self._sampling_weights[index] = sample.sampling_weight
 
     def restore_arrays(
         self,
@@ -480,6 +542,7 @@ class PackedStrategyReservoir:
         action_masks: NDArray[np.bool],
         iterations: NDArray[np.uint32],
         strategies: NDArray[np.float32],
+        sampling_weights: NDArray[np.float32] | None = None,
         samples_seen: int,
         rng_state: object,
     ) -> None:
@@ -500,6 +563,8 @@ class PackedStrategyReservoir:
             action_count=self.action_count,
             rng_state=rng_state,
             normalised=True,
+            sampling_weights=sampling_weights,
+            expects_sampling_weights=self._sampling_weights is not None,
         )
         size = len(states)
         self._players[:size] = players
@@ -507,6 +572,9 @@ class PackedStrategyReservoir:
         self._action_masks[:size] = action_masks
         self._iterations[:size] = iterations
         self._strategies[:size] = strategies
+        if self._sampling_weights is not None:
+            assert sampling_weights is not None
+            self._sampling_weights[:size] = sampling_weights
         self._size = size
         self._samples_seen = samples_seen
         self._rng = restored_rng
@@ -529,10 +597,12 @@ class AdvantageSample:
     action_mask: ActionMask
     iteration: int
     advantages: ActionValues
+    sampling_weight: float = 1.0
 
     def __post_init__(self) -> None:
         _validate_common_sample(self.state, self.action_mask, self.iteration)
         _validate_action_values("advantages", self.advantages, self.action_mask)
+        _validate_sampling_weight(self.sampling_weight)
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,6 +614,7 @@ class StrategySample:
     action_mask: ActionMask
     iteration: int
     strategy: ActionValues
+    sampling_weight: float = 1.0
 
     def __post_init__(self) -> None:
         if isinstance(self.player, bool) or not isinstance(self.player, int):
@@ -552,6 +623,7 @@ class StrategySample:
             raise ValueError("player must be 0 or 1")
         _validate_common_sample(self.state, self.action_mask, self.iteration)
         _validate_action_values("strategy", self.strategy, self.action_mask, normalised=True)
+        _validate_sampling_weight(self.sampling_weight)
 
 
 def _validate_common_sample(state: NeuralState, action_mask: ActionMask, iteration: int) -> None:
@@ -641,6 +713,13 @@ def _validate_packed_iteration(iteration: int) -> None:
         raise ValueError("iteration is outside packed uint32 range")
 
 
+def _validate_sampling_weight(sampling_weight: float) -> None:
+    if isinstance(sampling_weight, bool) or not isinstance(sampling_weight, Real):
+        raise TypeError("sampling_weight must be a real number")
+    if not isfinite(float(sampling_weight)) or sampling_weight < 0.0:
+        raise ValueError("sampling_weight must be finite and non-negative")
+
+
 def _validated_restore_state[SampleT](
     *,
     samples: tuple[SampleT, ...],
@@ -680,6 +759,8 @@ def _validated_packed_arrays(
     action_count: int,
     rng_state: object,
     normalised: bool,
+    sampling_weights: NDArray[np.float32] | None,
+    expects_sampling_weights: bool,
 ) -> Random:
     sample_count = len(states)
     if states.shape != (sample_count, state_size) or states.dtype != expected_state_dtype:
@@ -690,6 +771,17 @@ def _validated_packed_arrays(
         raise ValueError("packed iterations have an incompatible layout")
     if targets.shape != (sample_count, action_count) or targets.dtype != np.float32:
         raise ValueError("packed targets have an incompatible layout")
+    if expects_sampling_weights:
+        if (
+            sampling_weights is None
+            or sampling_weights.shape != (sample_count,)
+            or sampling_weights.dtype != np.float32
+        ):
+            raise ValueError("packed sampling weights have an incompatible layout")
+        if not np.all(np.isfinite(sampling_weights)) or np.any(sampling_weights < 0.0):
+            raise ValueError("packed sampling weights must be finite and non-negative")
+    elif sampling_weights is not None:
+        raise ValueError("packed sampling weights were not expected")
     if not np.all(np.isfinite(states)) or not np.all(np.isfinite(targets)):
         raise ValueError("packed floating-point values must be finite")
     if sample_count and (

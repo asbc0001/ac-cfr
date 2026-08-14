@@ -9,6 +9,7 @@ from time import perf_counter
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from torch import Tensor
 
 from ac_cfr.common.config import GameConfigurationId
@@ -125,6 +126,24 @@ class DeepCFRTrainingTimes:
     strategy_training_seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class ExplorationSamplingDiagnostics:
+    """Importance-weight health and raw/effective coverage for recent traversals."""
+
+    opponent_actions_sampled: int
+    zero_ratio_actions: int
+    ratio_p50: float
+    ratio_p95: float
+    ratio_p99: float
+    ratio_max: float
+    samples: int
+    positive_weight_samples: int
+    raw_information_sets: int
+    weighted_information_sets: int
+    sampling_weight_max: float
+    effective_sample_size: float
+
+
 _LOSS_EVALUATION_BATCHES = 4
 
 
@@ -178,6 +197,10 @@ class NaiveDeepCFR:
         self._traversal_seconds = 0.0
         self._advantage_training_seconds = 0.0
         self._strategy_training_seconds = 0.0
+        self._importance_ratios: list[float] = []
+        self._sample_weights: list[float] = []
+        self._raw_information_sets: set[int] = set()
+        self._weighted_information_sets: set[int] = set()
 
     @property
     def iteration(self) -> int:
@@ -243,6 +266,30 @@ class NaiveDeepCFR:
             strategy_training_seconds=self._strategy_training_seconds,
         )
 
+    @property
+    def recent_exploration_diagnostics(self) -> ExplorationSamplingDiagnostics:
+        """Summarise exploratory samples collected by the most recent train call."""
+        ratios = np.asarray(self._importance_ratios, dtype=np.float64)
+        weights = np.asarray(self._sample_weights, dtype=np.float64)
+        weight_sum = float(weights.sum())
+        squared_weight_sum = float(np.square(weights).sum())
+        return ExplorationSamplingDiagnostics(
+            opponent_actions_sampled=len(ratios),
+            zero_ratio_actions=int(np.count_nonzero(ratios == 0.0)),
+            ratio_p50=_quantile_or_default(ratios, 0.50, 1.0),
+            ratio_p95=_quantile_or_default(ratios, 0.95, 1.0),
+            ratio_p99=_quantile_or_default(ratios, 0.99, 1.0),
+            ratio_max=float(ratios.max()) if len(ratios) else 1.0,
+            samples=len(weights),
+            positive_weight_samples=int(np.count_nonzero(weights > 0.0)),
+            raw_information_sets=len(self._raw_information_sets),
+            weighted_information_sets=len(self._weighted_information_sets),
+            sampling_weight_max=float(weights.max()) if len(weights) else 1.0,
+            effective_sample_size=(
+                weight_sum * weight_sum / squared_weight_sum if squared_weight_sum > 0.0 else 0.0
+            ),
+        )
+
     def training_rng_state(self) -> dict[str, object]:
         """Return every mutable random stream used by traversal and reservoirs."""
         return {
@@ -300,6 +347,10 @@ class NaiveDeepCFR:
         self._traversal_seconds = 0.0
         self._advantage_training_seconds = 0.0
         self._strategy_training_seconds = 0.0
+        self._importance_ratios.clear()
+        self._sample_weights.clear()
+        self._raw_information_sets.clear()
+        self._weighted_information_sets.clear()
 
         for _ in range(iterations):
             current_iteration = self._iteration + 1
@@ -352,6 +403,7 @@ class NaiveDeepCFR:
                 traverser=player,
                 iteration=iteration,
                 sampled_opponent_actions={},
+                sampling_weight=1.0,
             )
 
     def _timed_strategy_network(self, iteration: int) -> DeepCFRNetwork:
@@ -368,6 +420,7 @@ class NaiveDeepCFR:
         traverser: int,
         iteration: int,
         sampled_opponent_actions: dict[int, int],
+        sampling_weight: float,
     ) -> float:
         """Sample chance/opponent nodes and fully explore traverser actions."""
         tree = self._tree
@@ -386,12 +439,15 @@ class NaiveDeepCFR:
                 traverser=traverser,
                 iteration=iteration,
                 sampled_opponent_actions=sampled_opponent_actions,
+                sampling_weight=sampling_weight,
             )
 
         acting_player = int(tree.current_players[node_id])
         information_set_id = int(tree.information_set_ids[node_id])
         strategy = self.strategy_for_information_set(information_set_id, acting_player)
         if acting_player != traverser:
+            # The current action has not been sampled yet, so this loss weight
+            # contains only ratios accumulated along the sampled prefix.
             self._strategy_reservoir.add(
                 StrategySample(
                     player=acting_player,
@@ -399,18 +455,38 @@ class NaiveDeepCFR:
                     action_mask=self._mask_tuple(information_set_id),
                     iteration=iteration,
                     strategy=strategy,
+                    sampling_weight=sampling_weight,
                 )
             )
+            self._record_sample(information_set_id, sampling_weight)
+            local_probabilities = _local_action_values(tree, node_id, strategy)
             action_position = sampled_opponent_actions.get(information_set_id)
             if action_position is None:
-                local_probabilities = _local_action_values(tree, node_id, strategy)
-                action_position = _sample_position(local_probabilities, self._policy_rng)
+                behaviour_probabilities = exploratory_opponent_probabilities(
+                    local_probabilities,
+                    self._config.opponent_exploration_epsilon,
+                )
+                action_position = _sample_position(behaviour_probabilities, self._policy_rng)
                 sampled_opponent_actions[information_set_id] = action_position
-            return self._traverse(
+            ratio = opponent_importance_ratio(
+                local_probabilities,
+                action_position,
+                self._config.opponent_exploration_epsilon,
+            )
+            self._record_importance_ratio(ratio)
+            # Carry the ratio down to correct descendant visitation and back up to
+            # correct the return sampled through this opponent action.
+            child_value = self._traverse(
                 node_id=int(tree.children[edge_start + action_position]),
                 traverser=traverser,
                 iteration=iteration,
                 sampled_opponent_actions=sampled_opponent_actions,
+                sampling_weight=sampling_weight * ratio,
+            )
+            return (
+                child_value
+                if self._config.opponent_exploration_epsilon == 0.0
+                else ratio * child_value
             )
 
         action_values = [
@@ -419,6 +495,7 @@ class NaiveDeepCFR:
                 traverser=traverser,
                 iteration=iteration,
                 sampled_opponent_actions=sampled_opponent_actions,
+                sampling_weight=sampling_weight,
             )
             for action_position in range(edge_count)
         ]
@@ -431,15 +508,32 @@ class NaiveDeepCFR:
         for action_position, action_value in enumerate(action_values):
             action = int(tree.edge_labels[edge_start + action_position])
             advantages[action] = action_value - node_value
+        # Suffix ratios are already present in the targets; the stored weight
+        # corrects only the probability of reaching this information set.
         self._advantage_reservoirs[traverser].add(
             AdvantageSample(
                 state=self._state_tuple(information_set_id),
                 action_mask=self._mask_tuple(information_set_id),
                 iteration=iteration,
                 advantages=tuple(advantages),
+                sampling_weight=sampling_weight,
             )
         )
+        self._record_sample(information_set_id, sampling_weight)
         return node_value
+
+    def _record_sample(self, information_set_id: int, sampling_weight: float) -> None:
+        if self._config.opponent_exploration_epsilon == 0.0:
+            return
+        self._sample_weights.append(sampling_weight)
+        self._raw_information_sets.add(information_set_id)
+        if sampling_weight > 0.0:
+            self._weighted_information_sets.add(information_set_id)
+
+    def _record_importance_ratio(self, ratio: float) -> None:
+        if self._config.opponent_exploration_epsilon == 0.0:
+            return
+        self._importance_ratios.append(ratio)
 
     def _predict_advantages(self, information_set_id: int, player: int) -> tuple[float, ...]:
         """Query one network once, or return the explicit initial zero prediction."""
@@ -567,6 +661,7 @@ def linear_cfr_loss(
     current_iteration: int,
     *,
     strategy_targets: bool,
+    sampling_weights: Tensor | None = None,
 ) -> Tensor:
     """Return the specified iteration-weighted, legal-action-summed loss."""
     if current_iteration < 1:
@@ -577,6 +672,8 @@ def linear_cfr_loss(
         raise ValueError("action tensors have incompatible dimensions")
     if sample_iterations.shape != (predictions.shape[0],):
         raise ValueError("sample_iterations has an incompatible shape")
+    if sampling_weights is not None and sampling_weights.shape != (predictions.shape[0],):
+        raise ValueError("sampling_weights has an incompatible shape")
 
     transformed_predictions = (
         _masked_softmax(predictions, action_masks) if strategy_targets else predictions
@@ -585,9 +682,15 @@ def linear_cfr_loss(
     _require_finite_tensor("targets", targets)
     _require_finite_tensor("transformed predictions", transformed_predictions)
     _require_finite_tensor("sample iterations", sample_iterations)
+    if sampling_weights is not None:
+        _require_finite_tensor("sampling weights", sampling_weights)
+        if bool((sampling_weights < 0.0).any()):
+            raise ValueError("sampling_weights must be non-negative")
     squared_errors = (transformed_predictions - targets).square()
     per_sample_errors = (squared_errors * action_masks).sum(dim=1)
     weights = 2.0 * sample_iterations / current_iteration
+    if sampling_weights is not None:
+        weights = weights * sampling_weights
     loss = (weights * per_sample_errors).mean()
     _require_finite_tensor("loss", loss)
     return loss
@@ -626,12 +729,18 @@ def _train_network(
         dtype=torch.float32,
     )
     sample_iterations = torch.tensor([sample.iteration for sample in samples], dtype=torch.float32)
+    sampling_weights = (
+        torch.tensor([sample.sampling_weight for sample in samples], dtype=torch.float32)
+        if any(sample.sampling_weight != 1.0 for sample in samples)
+        else None
+    )
     return _train_network_tensors(
         network=network,
         states=states,
         action_masks=action_masks,
         targets=targets,
         sample_iterations=sample_iterations,
+        sampling_weights=sampling_weights,
         current_iteration=current_iteration,
         training_steps=training_steps,
         batch_size=batch_size,
@@ -652,6 +761,7 @@ def _train_network_tensors(
     action_masks: Tensor,
     targets: Tensor,
     sample_iterations: Tensor,
+    sampling_weights: Tensor | None = None,
     current_iteration: int,
     training_steps: int,
     batch_size: int,
@@ -670,6 +780,7 @@ def _train_network_tensors(
         action_masks=action_masks,
         targets=targets,
         sample_iterations=sample_iterations,
+        sampling_weights=sampling_weights,
         current_iteration=current_iteration,
         update_milestones=(training_steps,),
         batch_size=batch_size,
@@ -696,6 +807,7 @@ def train_network_tensor_milestones(
     action_masks: Tensor,
     targets: Tensor,
     sample_iterations: Tensor,
+    sampling_weights: Tensor | None = None,
     current_iteration: int,
     update_milestones: tuple[int, ...],
     batch_size: int,
@@ -715,6 +827,8 @@ def train_network_tensor_milestones(
         raise ValueError("packed action data must match the state count")
     if sample_iterations.shape != (len(states),):
         raise ValueError("packed sample iterations must match the state count")
+    if sampling_weights is not None and sampling_weights.shape != (len(states),):
+        raise ValueError("packed sampling weights must match the state count")
     if (
         not isinstance(update_milestones, tuple)
         or not update_milestones
@@ -757,6 +871,7 @@ def train_network_tensor_milestones(
                 targets=targets,
                 action_masks=action_masks,
                 sample_iterations=sample_iterations,
+                sampling_weights=sampling_weights,
                 training_indices=training_indices,
                 current_iteration=current_iteration,
                 training_steps=milestone - completed_steps,
@@ -778,6 +893,7 @@ def train_network_tensor_milestones(
                 targets,
                 action_masks,
                 sample_iterations,
+                sampling_weights,
                 training_evaluation_indices,
                 current_iteration,
                 strategy_targets=strategy_targets,
@@ -789,6 +905,7 @@ def train_network_tensor_milestones(
                     targets,
                     action_masks,
                     sample_iterations,
+                    sampling_weights,
                     validation_evaluation_indices,
                     current_iteration,
                     strategy_targets=strategy_targets,
@@ -825,6 +942,7 @@ def _fit_network(
     targets: Tensor,
     action_masks: Tensor,
     sample_iterations: Tensor,
+    sampling_weights: Tensor | None,
     training_indices: Tensor,
     current_iteration: int,
     training_steps: int,
@@ -853,6 +971,9 @@ def _fit_network(
             sample_iterations[indices].to(device),
             current_iteration,
             strategy_targets=strategy_targets,
+            sampling_weights=(
+                None if sampling_weights is None else sampling_weights[indices].to(device)
+            ),
         )
         loss.backward()
         _require_finite_gradients(network)
@@ -917,6 +1038,7 @@ def _evaluate_network_loss(
     targets: Tensor,
     action_masks: Tensor,
     sample_iterations: Tensor,
+    sampling_weights: Tensor | None,
     indices: Tensor,
     current_iteration: int,
     *,
@@ -932,6 +1054,9 @@ def _evaluate_network_loss(
             sample_iterations[indices].to(device),
             current_iteration,
             strategy_targets=strategy_targets,
+            sampling_weights=(
+                None if sampling_weights is None else sampling_weights[indices].to(device)
+            ),
         )
     return float(loss)
 
@@ -963,6 +1088,41 @@ def _local_action_values(
         canonical_values[int(tree.edge_labels[edge_start + position])]
         for position in range(edge_count)
     )
+
+
+def exploratory_opponent_probabilities(
+    strategy: tuple[float, ...] | NDArray[np.float64],
+    epsilon: float,
+) -> tuple[float, ...] | NDArray[np.float64]:
+    """Mix an opponent policy with uniform exploration over its legal actions."""
+    if epsilon == 0.0:
+        return strategy
+    action_count = len(strategy)
+    if action_count < 1:
+        raise ValueError("strategy must contain at least one action")
+    return np.asarray(strategy, dtype=np.float64) * (1.0 - epsilon) + epsilon / action_count
+
+
+def opponent_importance_ratio(
+    strategy: tuple[float, ...] | NDArray[np.float64],
+    action_position: int,
+    epsilon: float,
+) -> float:
+    """Return sigma/q for one action sampled from the exploratory behaviour policy."""
+    if epsilon == 0.0:
+        return 1.0
+    behaviour = exploratory_opponent_probabilities(strategy, epsilon)
+    return float(strategy[action_position]) / float(behaviour[action_position])
+
+
+def _quantile_or_default(
+    values: NDArray[np.float64],
+    quantile: float,
+    default: float,
+) -> float:
+    if len(values) == 0:
+        return default
+    return float(np.quantile(values, quantile))
 
 
 def _sample_position(probabilities: tuple[float, ...] | np.ndarray, rng: Random) -> int:

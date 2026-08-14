@@ -10,7 +10,7 @@ from ac_cfr.common.environment import effective_cpu_count
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
-_FORMAT_VERSION = 5
+_FORMAT_VERSION = 6
 _RUN_FIELDS = {"implementation", "checkpoint_interval", "checkpoint_retention"}
 _VERSION_TWO_RUN_FIELDS = _RUN_FIELDS - {"checkpoint_retention"}
 _TRAINING_FIELDS = {
@@ -25,6 +25,7 @@ _TRAINING_FIELDS = {
     "learning_rate",
     "validation_fraction",
     "validation_split_id",
+    "opponent_exploration_epsilon",
     "max_gradient_norm",
     "dropout_probability",
     "seed",
@@ -34,7 +35,8 @@ _TRAINING_FIELDS = {
     "state_encoding_id",
     "optimizer_id",
 }
-_VERSION_FOUR_TRAINING_FIELDS = _TRAINING_FIELDS - {"validation_split_id"}
+_VERSION_FIVE_TRAINING_FIELDS = _TRAINING_FIELDS - {"opponent_exploration_epsilon"}
+_VERSION_FOUR_TRAINING_FIELDS = _VERSION_FIVE_TRAINING_FIELDS - {"validation_split_id"}
 _LEGACY_TRAINING_FIELDS = _VERSION_FOUR_TRAINING_FIELDS - {
     "advantage_batch_size",
     "strategy_batch_size",
@@ -67,7 +69,7 @@ def load_deep_cfr_run_config(
     format_version = values["format_version"]
     if isinstance(format_version, bool) or not isinstance(format_version, int):
         raise ValueError("Deep CFR configuration format_version is incompatible")
-    if format_version not in (1, 2, 3, 4, _FORMAT_VERSION):
+    if format_version not in (1, 2, 3, 4, 5, _FORMAT_VERSION):
         raise ValueError("Deep CFR configuration format_version is incompatible")
 
     run = _strict_table(
@@ -79,6 +81,8 @@ def load_deep_cfr_run_config(
         if format_version == 1
         else _VERSION_FOUR_TRAINING_FIELDS
         if format_version <= 4
+        else _VERSION_FIVE_TRAINING_FIELDS
+        if format_version == 5
         else _TRAINING_FIELDS
     )
     training = _strict_table(values["training"], training_fields, "training")
@@ -88,6 +92,7 @@ def load_deep_cfr_run_config(
         training["strategy_batch_size"] = batch_size
         training["game_configuration_id"] = "leduc"
     training.setdefault("validation_split_id", "sample")
+    training.setdefault("opponent_exploration_epsilon", 0.0)
     runtime_fields = (
         _RUNTIME_FIELDS
         if format_version >= 4

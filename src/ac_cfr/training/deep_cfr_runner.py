@@ -34,7 +34,11 @@ from ac_cfr.persistence.files import (
     checkpoint_staging_directory,
     write_json,
 )
-from ac_cfr.persistence.results import DeepCFRIterationMetricStore, DeepCFRMetricStore
+from ac_cfr.persistence.results import (
+    DeepCFRExplorationMetricStore,
+    DeepCFRIterationMetricStore,
+    DeepCFRMetricStore,
+)
 from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
@@ -240,6 +244,13 @@ def _execute_schedule(
     snapshot_paths: list[Path] = []
     iteration_store = DeepCFRIterationMetricStore(run_directory / "iteration_metrics.csv")
     iteration_store.retain_through(solver.iteration)
+    exploration_store = (
+        DeepCFRExplorationMetricStore(run_directory / "exploration_metrics.csv")
+        if config.training.opponent_exploration_epsilon > 0.0
+        else None
+    )
+    if exploration_store is not None:
+        exploration_store.retain_through(solver.iteration)
     if progress_callback is not None:
         progress_callback(solver.iteration, total_iterations)
     stopped = False
@@ -292,6 +303,10 @@ def _execute_schedule(
                 elapsed_training_seconds=elapsed_training_seconds,
             )
 
+        # Publish diagnostics before the matching checkpoint. Resume trims records
+        # past the recovered iteration if checkpoint publication did not complete.
+        if exploration_store is not None:
+            _record_exploration_diagnostics(exploration_store, solver, config)
         if should_checkpoint:
             _save_recovery_checkpoint(
                 run_directory=run_directory,
@@ -510,6 +525,39 @@ def _record_iteration_diagnostics(
     )
 
 
+def _record_exploration_diagnostics(
+    store: DeepCFRExplorationMetricStore,
+    solver: NaiveDeepCFR,
+    config: DeepCFRRunConfig,
+) -> None:
+    """Persist importance ratios, effective sample size, and coverage for one iteration."""
+    diagnostics = solver.recent_exploration_diagnostics
+    store.upsert(
+        {
+            "game": GameId.LEDUC.value,
+            "game_version": config.training.game_configuration_id.value,
+            "solver": config.implementation.value,
+            "run_id": config.run_id,
+            "strategy_snapshot_id": "",
+            "iteration": solver.iteration,
+            "seed": config.training.seed,
+            "epsilon": config.training.opponent_exploration_epsilon,
+            "opponent_actions_sampled": diagnostics.opponent_actions_sampled,
+            "zero_ratio_actions": diagnostics.zero_ratio_actions,
+            "ratio_p50": diagnostics.ratio_p50,
+            "ratio_p95": diagnostics.ratio_p95,
+            "ratio_p99": diagnostics.ratio_p99,
+            "ratio_max": diagnostics.ratio_max,
+            "samples": diagnostics.samples,
+            "positive_weight_samples": diagnostics.positive_weight_samples,
+            "raw_information_sets": diagnostics.raw_information_sets,
+            "weighted_information_sets": diagnostics.weighted_information_sets,
+            "sampling_weight_max": diagnostics.sampling_weight_max,
+            "effective_sample_size": diagnostics.effective_sample_size,
+        }
+    )
+
+
 def _append_training_log(run_directory: Path, message: str) -> None:
     """Durably append one concise lifecycle event without buffering it in memory."""
     run_directory.mkdir(parents=True, exist_ok=True)
@@ -558,6 +606,9 @@ def _require_checkpoint_space(directory: Path, solver: NaiveDeepCFR) -> None:
             occupied_bytes += sum(len(repr(sample)) for sample in reservoir.samples)
             continue
         occupied_bytes += sum(array.nbytes for array in arrays)
+        sampling_weights = getattr(reservoir, "sampling_weights", None)
+        if sampling_weights is not None:
+            occupied_bytes += sampling_weights.nbytes
         # Checkpoints widen packed uint32 iteration numbers to int64.
         occupied_bytes += len(reservoir) * 4
     network_bytes = sum(

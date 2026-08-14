@@ -29,6 +29,7 @@ from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.reservoirs import (
     DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
+    DEEP_CFR_WEIGHTED_RESERVOIR_SCHEMA_VERSION,
     AdvantageSample,
     PackedAdvantageReservoir,
     PackedStrategyReservoir,
@@ -89,6 +90,7 @@ def save_deep_cfr_checkpoint(
     )
     completed_snapshots = sorted(solver.snapshot_networks)
     metrics = [metric.to_dict() for metric in solver.training_metrics]
+    weighted_sampling = config.opponent_exploration_epsilon > 0.0
     metadata = {
         "checkpoint_schema_version": DEEP_CFR_CHECKPOINT_SCHEMA_VERSION,
         "project_version": PROJECT_VERSION,
@@ -101,7 +103,7 @@ def save_deep_cfr_checkpoint(
         "solver": implementation.value,
         "model_config_id": config.model_config_id.value,
         "optimizer_id": config.optimizer_id.value,
-        "reservoir_schema_version": DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
+        "reservoir_schema_version": _reservoir_schema_version(config),
         "rng_contract": _RNG_CONTRACT,
         "run_id": run_id,
         "checkpoint_id": checkpoint_id,
@@ -130,13 +132,19 @@ def save_deep_cfr_checkpoint(
         "final_strategy_network": _network_state(solver.final_strategy_network),
         "optimizer_states": {},
         "advantage_reservoirs": [
-            _pack_advantage_storage(reservoir, architecture.input_size, architecture.output_size)
+            _pack_advantage_storage(
+                reservoir,
+                architecture.input_size,
+                architecture.output_size,
+                weighted_sampling=weighted_sampling,
+            )
             for reservoir in solver.advantage_reservoirs
         ],
         "strategy_reservoir": _pack_strategy_storage(
             solver.strategy_reservoir,
             architecture.input_size,
             architecture.output_size,
+            weighted_sampling=weighted_sampling,
         ),
         "rng_state": solver.training_rng_state(),
         "training_metrics": metrics,
@@ -231,6 +239,7 @@ def load_deep_cfr_checkpoint(
             payload["strategy_reservoir"],
             iteration,
             rng_state,
+            weighted_sampling=config.opponent_exploration_epsilon > 0.0,
         )
     else:
         advantage_reservoirs = _load_advantage_reservoirs(
@@ -239,6 +248,7 @@ def load_deep_cfr_checkpoint(
             iteration,
             architecture.input_size,
             architecture.output_size,
+            weighted_sampling=config.opponent_exploration_epsilon > 0.0,
         )
         strategy_reservoir = _unpack_strategy_reservoir(
             payload["strategy_reservoir"],
@@ -246,6 +256,7 @@ def load_deep_cfr_checkpoint(
             iteration,
             architecture.input_size,
             architecture.output_size,
+            weighted_sampling=config.opponent_exploration_epsilon > 0.0,
         )
         for player, samples in enumerate(advantage_reservoirs):
             reservoir_state = payload["advantage_reservoirs"][player]
@@ -314,7 +325,6 @@ def _validated_metadata(
         "game_version": game_version,
         "action_space": ACTION_SPACE_ID,
         "tree_digest": compatibility_digest,
-        "reservoir_schema_version": DEEP_CFR_RESERVOIR_SCHEMA_VERSION,
         "rng_contract": _RNG_CONTRACT,
     }
     if metadata["checkpoint_schema_version"] not in (3, DEEP_CFR_CHECKPOINT_SCHEMA_VERSION):
@@ -333,6 +343,8 @@ def _validated_metadata(
     if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
         raise ValueError("Deep CFR checkpoint iteration is invalid")
     config = DeepCFRTrainingConfig.from_dict(metadata["training_config"])
+    if metadata["reservoir_schema_version"] != _reservoir_schema_version(config):
+        raise ValueError("Deep CFR checkpoint has incompatible reservoir_schema_version")
     DeepCFRRuntimeConfig.from_dict(metadata["runtime_config"])
     if iteration > config.iterations:
         raise ValueError("Deep CFR checkpoint iteration exceeds its training budget")
@@ -364,6 +376,13 @@ def _solver_game_metadata(solver: NaiveDeepCFR) -> tuple[str, str, str]:
         game, game_version, digest = _game_metadata(holdem_configuration)
         return game, game_version, digest
     return _game_metadata(solver.tree)
+
+
+def _reservoir_schema_version(config: DeepCFRTrainingConfig) -> int:
+    """Keep default and Hold'em checkpoints on the original reservoir schema."""
+    if config.opponent_exploration_epsilon > 0.0:
+        return DEEP_CFR_WEIGHTED_RESERVOIR_SCHEMA_VERSION
+    return DEEP_CFR_RESERVOIR_SCHEMA_VERSION
 
 
 def _game_metadata(
@@ -471,8 +490,10 @@ def _pack_advantage_reservoir(
     samples: tuple[AdvantageSample, ...],
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> dict[str, object]:
-    return {
+    values = {
         "capacity": capacity,
         "samples_seen": samples_seen,
         "states": _states_tensor(samples, state_size),
@@ -482,12 +503,19 @@ def _pack_advantage_reservoir(
             [sample.advantages for sample in samples], len(samples), action_count
         ),
     }
+    if weighted_sampling:
+        values["sampling_weights"] = torch.tensor(
+            [sample.sampling_weight for sample in samples], dtype=torch.float64
+        )
+    return values
 
 
 def _pack_advantage_storage(
     reservoir: UniformReservoir[AdvantageSample] | PackedAdvantageReservoir,
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> dict[str, object]:
     """Pack a reservoir directly when contiguous arrays are available."""
     if not isinstance(reservoir, PackedAdvantageReservoir):
@@ -497,9 +525,10 @@ def _pack_advantage_storage(
             reservoir.samples,
             state_size,
             action_count,
+            weighted_sampling=weighted_sampling,
         )
     states, action_masks, iterations, advantages = reservoir.arrays
-    return {
+    values = {
         "capacity": reservoir.capacity,
         "samples_seen": reservoir.samples_seen,
         "states": torch.from_numpy(states),
@@ -507,6 +536,12 @@ def _pack_advantage_storage(
         "iterations": torch.from_numpy(iterations.astype("int64")),
         "advantages": torch.from_numpy(advantages),
     }
+    if weighted_sampling:
+        sampling_weights = reservoir.sampling_weights
+        if sampling_weights is None:
+            raise ValueError("weighted checkpoint requires reservoir sampling weights")
+        values["sampling_weights"] = torch.from_numpy(sampling_weights)
+    return values
 
 
 def _pack_strategy_reservoir(
@@ -515,8 +550,10 @@ def _pack_strategy_reservoir(
     samples: tuple[StrategySample, ...],
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> dict[str, object]:
-    return {
+    values = {
         "capacity": capacity,
         "samples_seen": samples_seen,
         "players": torch.tensor([sample.player for sample in samples], dtype=torch.int8),
@@ -527,12 +564,19 @@ def _pack_strategy_reservoir(
             [sample.strategy for sample in samples], len(samples), action_count
         ),
     }
+    if weighted_sampling:
+        values["sampling_weights"] = torch.tensor(
+            [sample.sampling_weight for sample in samples], dtype=torch.float64
+        )
+    return values
 
 
 def _pack_strategy_storage(
     reservoir: UniformReservoir[StrategySample] | PackedStrategyReservoir,
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> dict[str, object]:
     """Pack a strategy reservoir without constructing millions of objects."""
     if not isinstance(reservoir, PackedStrategyReservoir):
@@ -542,9 +586,10 @@ def _pack_strategy_storage(
             reservoir.samples,
             state_size,
             action_count,
+            weighted_sampling=weighted_sampling,
         )
     players, states, action_masks, iterations, strategies = reservoir.arrays
-    return {
+    values = {
         "capacity": reservoir.capacity,
         "samples_seen": reservoir.samples_seen,
         "players": torch.from_numpy(players),
@@ -553,6 +598,12 @@ def _pack_strategy_storage(
         "iterations": torch.from_numpy(iterations.astype("int64")),
         "strategies": torch.from_numpy(strategies),
     }
+    if weighted_sampling:
+        sampling_weights = reservoir.sampling_weights
+        if sampling_weights is None:
+            raise ValueError("weighted checkpoint requires reservoir sampling weights")
+        values["sampling_weights"] = torch.from_numpy(sampling_weights)
+    return values
 
 
 def _states_tensor(
@@ -589,6 +640,8 @@ def _load_advantage_reservoirs(
     checkpoint_iteration: int,
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> tuple[tuple[AdvantageSample, ...], tuple[AdvantageSample, ...]]:
     if not isinstance(value, list) or len(value) != 2:
         raise ValueError("Deep CFR checkpoint advantage reservoirs are invalid")
@@ -599,6 +652,7 @@ def _load_advantage_reservoirs(
             checkpoint_iteration,
             state_size,
             action_count,
+            weighted_sampling=weighted_sampling,
         ),
         _unpack_advantage_reservoir(
             value[1],
@@ -606,6 +660,7 @@ def _load_advantage_reservoirs(
             checkpoint_iteration,
             state_size,
             action_count,
+            weighted_sampling=weighted_sampling,
         ),
     )
 
@@ -616,6 +671,8 @@ def _restore_packed_reservoirs(
     strategy_value: object,
     checkpoint_iteration: int,
     rng_state: dict[str, object],
+    *,
+    weighted_sampling: bool,
 ) -> None:
     """Restore contiguous optimiser memories without constructing sample objects."""
     advantage_reservoirs = solver.advantage_reservoirs
@@ -633,10 +690,13 @@ def _restore_packed_reservoirs(
         if not isinstance(raw_reservoir, dict):
             raise ValueError("Deep CFR checkpoint advantage reservoir is invalid")
         state_dtype = _torch_dtype(reservoir.arrays[0].dtype)
+        fields = ("states", "action_masks", "iterations", "advantages")
+        if weighted_sampling:
+            fields += ("sampling_weights",)
         tensors, sample_count = _validated_reservoir(
             raw_reservoir,
             reservoir.capacity,
-            ("states", "action_masks", "iterations", "advantages"),
+            fields,
             state_size=reservoir.state_size,
             action_count=reservoir.action_count,
             state_dtype=state_dtype,
@@ -648,11 +708,13 @@ def _restore_packed_reservoirs(
             "advantages",
         )
         iterations = _packed_iterations(tensors["iterations"], checkpoint_iteration)
+        sampling_weights = _packed_sampling_weights(tensors, sample_count, weighted_sampling)
         reservoir.restore_arrays(
             states=tensors["states"].cpu().numpy(),
             action_masks=tensors["action_masks"].cpu().numpy(),
             iterations=iterations,
             advantages=tensors["advantages"].cpu().numpy(),
+            sampling_weights=sampling_weights,
             samples_seen=raw_reservoir["samples_seen"],
             rng_state=rng_state[f"advantage_reservoir_{player}"],
         )
@@ -660,10 +722,13 @@ def _restore_packed_reservoirs(
     if not isinstance(strategy_value, dict):
         raise ValueError("Deep CFR checkpoint strategy reservoir is invalid")
     state_dtype = _torch_dtype(strategy_reservoir.arrays[1].dtype)
+    fields = ("players", "states", "action_masks", "iterations", "strategies")
+    if weighted_sampling:
+        fields += ("sampling_weights",)
     tensors, sample_count = _validated_reservoir(
         strategy_value,
         strategy_reservoir.capacity,
-        ("players", "states", "action_masks", "iterations", "strategies"),
+        fields,
         state_size=strategy_reservoir.state_size,
         action_count=strategy_reservoir.action_count,
         state_dtype=state_dtype,
@@ -681,6 +746,7 @@ def _restore_packed_reservoirs(
         action_masks=tensors["action_masks"].cpu().numpy(),
         iterations=_packed_iterations(tensors["iterations"], checkpoint_iteration),
         strategies=tensors["strategies"].cpu().numpy(),
+        sampling_weights=_packed_sampling_weights(tensors, sample_count, weighted_sampling),
         samples_seen=strategy_value["samples_seen"],
         rng_state=rng_state["strategy_reservoir"],
     )
@@ -694,6 +760,20 @@ def _packed_iterations(
     if len(values) and (int(values.min()) < 1 or int(values.max()) > checkpoint_iteration):
         raise ValueError("Deep CFR checkpoint reservoir contains invalid sample iterations")
     return values.cpu().numpy().astype("uint32")
+
+
+def _packed_sampling_weights(
+    tensors: dict[str, Tensor],
+    sample_count: int,
+    weighted_sampling: bool,
+) -> NDArray[np.float32] | None:
+    if not weighted_sampling:
+        return None
+    values = tensors["sampling_weights"]
+    _validate_tensor(values, (sample_count,), torch.float32, "sampling_weights")
+    if bool((values < 0.0).any()):
+        raise ValueError("Deep CFR checkpoint sampling weights must be non-negative")
+    return values.cpu().numpy()
 
 
 def _torch_dtype(dtype: np.dtype[Any]) -> torch.dtype:
@@ -710,11 +790,16 @@ def _unpack_advantage_reservoir(
     checkpoint_iteration: int,
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> tuple[AdvantageSample, ...]:
+    fields = ("states", "action_masks", "iterations", "advantages")
+    if weighted_sampling:
+        fields += ("sampling_weights",)
     tensors, sample_count = _validated_reservoir(
         value,
         expected_capacity,
-        ("states", "action_masks", "iterations", "advantages"),
+        fields,
         state_size=state_size,
         action_count=action_count,
     )
@@ -724,12 +809,15 @@ def _unpack_advantage_reservoir(
         torch.float64,
         "advantages",
     )
+    if weighted_sampling:
+        _validate_sampling_weight_tensor(tensors["sampling_weights"], sample_count)
     samples = tuple(
         AdvantageSample(
             state=tuple(float(item) for item in tensors["states"][row].tolist()),
             action_mask=tuple(bool(item) for item in tensors["action_masks"][row].tolist()),
             iteration=int(tensors["iterations"][row]),
             advantages=tuple(float(item) for item in tensors["advantages"][row].tolist()),
+            sampling_weight=(float(tensors["sampling_weights"][row]) if weighted_sampling else 1.0),
         )
         for row in range(sample_count)
     )
@@ -743,11 +831,16 @@ def _unpack_strategy_reservoir(
     checkpoint_iteration: int,
     state_size: int,
     action_count: int,
+    *,
+    weighted_sampling: bool,
 ) -> tuple[StrategySample, ...]:
+    fields = ("players", "states", "action_masks", "iterations", "strategies")
+    if weighted_sampling:
+        fields += ("sampling_weights",)
     tensors, sample_count = _validated_reservoir(
         value,
         expected_capacity,
-        ("players", "states", "action_masks", "iterations", "strategies"),
+        fields,
         state_size=state_size,
         action_count=action_count,
     )
@@ -758,6 +851,8 @@ def _unpack_strategy_reservoir(
         torch.float64,
         "strategies",
     )
+    if weighted_sampling:
+        _validate_sampling_weight_tensor(tensors["sampling_weights"], sample_count)
     samples = tuple(
         StrategySample(
             player=int(tensors["players"][row]),
@@ -765,6 +860,7 @@ def _unpack_strategy_reservoir(
             action_mask=tuple(bool(item) for item in tensors["action_masks"][row].tolist()),
             iteration=int(tensors["iterations"][row]),
             strategy=tuple(float(item) for item in tensors["strategies"][row].tolist()),
+            sampling_weight=(float(tensors["sampling_weights"][row]) if weighted_sampling else 1.0),
         )
         for row in range(sample_count)
     )
@@ -819,6 +915,12 @@ def _validate_tensor(tensor: Tensor, shape: tuple[int, ...], dtype: torch.dtype,
         raise ValueError(f"Deep CFR checkpoint reservoir {name} is incompatible")
     if tensor.is_floating_point() and not bool(torch.isfinite(tensor).all()):
         raise ValueError(f"Deep CFR checkpoint reservoir {name} must be finite")
+
+
+def _validate_sampling_weight_tensor(values: Tensor, sample_count: int) -> None:
+    _validate_tensor(values, (sample_count,), torch.float64, "sampling_weights")
+    if bool((values < 0.0).any()):
+        raise ValueError("Deep CFR checkpoint sampling weights must be non-negative")
 
 
 def _validate_sample_iterations(

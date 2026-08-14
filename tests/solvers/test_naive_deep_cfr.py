@@ -15,7 +15,9 @@ from ac_cfr.solvers.naive_deep_cfr import (
     _split_training_indices,
     _train_network_tensors,
     deep_cfr_regret_matching,
+    exploratory_opponent_probabilities,
     linear_cfr_loss,
+    opponent_importance_ratio,
     train_network_tensor_milestones,
 )
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
@@ -84,9 +86,23 @@ def test_deep_cfr_strategy_and_linear_losses_follow_algorithm_rules() -> None:
         current_iteration=4,
         strategy_targets=True,
     )
+    corrected_loss = linear_cfr_loss(
+        predictions,
+        targets,
+        masks,
+        sample_iterations,
+        current_iteration=4,
+        strategy_targets=False,
+        sampling_weights=torch.tensor((2.0, 0.0)),
+    )
+    strategy = (0.2, 0.8)
 
     assert float(advantage_loss) == pytest.approx(3.25)
     assert float(strategy_loss) == pytest.approx(0.0)
+    assert float(corrected_loss) == pytest.approx(2.5)
+    assert exploratory_opponent_probabilities(strategy, 0.0) is strategy
+    assert exploratory_opponent_probabilities(strategy, 0.1) == pytest.approx((0.23, 0.77))
+    assert opponent_importance_ratio(strategy, 0, 0.0) == 1.0
 
 
 def test_naive_deep_cfr_updates_in_order_and_exports_frozen_policies() -> None:

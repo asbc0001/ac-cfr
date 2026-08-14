@@ -77,6 +77,7 @@ def test_optimised_deep_cfr_uses_packed_memory_and_exports_a_legal_policy() -> N
         max_gradient_norm=10.0,
         dropout_probability=0.0,
         seed=2026,
+        opponent_exploration_epsilon=0.1,
     )
     runtime = DeepCFRRuntimeConfig(inference_batch_size=2, cpu_threads=1, device="cpu")
     solver = _ObservedDeepCFR(tree, config, runtime)
@@ -90,6 +91,12 @@ def test_optimised_deep_cfr_uses_packed_memory_and_exports_a_legal_policy() -> N
     assert len(solver.strategy_reservoir) > 0
     assert all(reservoir.resident_bytes > 0 for reservoir in solver.advantage_reservoirs)
     assert solver.strategy_reservoir.resident_bytes > 0
+    assert all(
+        reservoir.sampling_weights is not None
+        for reservoir in (*solver.advantage_reservoirs, solver.strategy_reservoir)
+    )
+    assert solver.recent_exploration_diagnostics.opponent_actions_sampled > 0
+    assert solver.recent_exploration_diagnostics.effective_sample_size > 0.0
     assert solver.final_strategy_network is not None
     assert all(
         sum(sample.strategy) == pytest.approx(1.0)

@@ -83,6 +83,30 @@ DEEP_CFR_ITERATION_FIELDS: Final = (
 )
 DEEP_CFR_ITERATION_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
 
+DEEP_CFR_EXPLORATION_FIELDS: Final = (
+    "game",
+    "game_version",
+    "solver",
+    "run_id",
+    "strategy_snapshot_id",
+    "iteration",
+    "seed",
+    "epsilon",
+    "opponent_actions_sampled",
+    "zero_ratio_actions",
+    "ratio_p50",
+    "ratio_p95",
+    "ratio_p99",
+    "ratio_max",
+    "samples",
+    "positive_weight_samples",
+    "raw_information_sets",
+    "weighted_information_sets",
+    "sampling_weight_max",
+    "effective_sample_size",
+)
+DEEP_CFR_EXPLORATION_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
+
 EVALUATION_RESULT_FIELDS: Final = (
     "game",
     "game_version",
@@ -285,6 +309,30 @@ class DeepCFRIterationMetricStore:
         """Discard records newer than a resumed recovery checkpoint."""
         records: list[dict[str, object]] = [
             dict(record) for record in self.records if int(record["iteration"]) <= iteration
+        ]
+        self._store.replace(records)
+
+
+class DeepCFRExplorationMetricStore:
+    """Store importance-weight and coverage diagnostics for exploratory Leduc runs."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, path: Path) -> None:
+        self._store = _CsvRecordStore(
+            path,
+            fields=DEEP_CFR_EXPLORATION_FIELDS,
+            key_fields=DEEP_CFR_EXPLORATION_KEY_FIELDS,
+        )
+
+    def upsert(self, values: dict[str, object]) -> None:
+        """Insert or replace one completed-iteration exploration record."""
+        self._store.upsert(values)
+
+    def retain_through(self, iteration: int) -> None:
+        """Discard records newer than a resumed recovery checkpoint."""
+        records: list[dict[str, object]] = [
+            dict(record) for record in self._store.records if int(record["iteration"]) <= iteration
         ]
         self._store.replace(records)
 

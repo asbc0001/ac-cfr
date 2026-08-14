@@ -1,0 +1,36 @@
+format_version = 6
+
+# Leduc-only epsilon-greedy opponent sampling with importance correction.
+[run]
+implementation = "optimised"
+checkpoint_interval = 1
+checkpoint_retention = 2
+
+[training]
+iterations = 20
+traversals_per_player = 1000
+advantage_reservoir_capacity = 100000
+strategy_reservoir_capacity = 100000
+advantage_training_steps = 100
+strategy_training_steps = 200
+advantage_batch_size = 512
+strategy_batch_size = 512
+learning_rate = 0.001
+validation_fraction = 0.1
+validation_split_id = "sample"
+opponent_exploration_epsilon = 0.1
+max_gradient_norm = 10.0
+dropout_probability = 0.0
+seed = 20260811
+snapshot_iterations = [5, 10, 15]
+game_configuration_id = "leduc"
+model_config_id = "leduc_deep_cfr"
+state_encoding_id = "leduc_neural"
+optimizer_id = "adam"
+
+[runtime]
+inference_batch_size = 512
+cpu_threads = 1
+device = "cpu"
+traversal_workers = 1
+storage_budget_bytes = 10000000000

@@ -1,0 +1,113 @@
+{
+  "about": "Leduc-only importance-corrected exploratory opponent-sampling gate. No Kuhn or Hold'em runs are part of this validation.",
+  "configuration": {
+    "baseline_preset": "configs/deep_cfr/leduc_exploration_baseline.toml",
+    "checkpoint_interval": 1,
+    "comparison_rule": "Exploratory sampling must improve at least two paired final seeds and lower median final exact exploitability.",
+    "exploratory_preset": "configs/deep_cfr/leduc_exploratory_sampling.toml"
+  },
+  "estimator_checks": [
+    {
+      "limit": 0.15,
+      "name": "corrected_advantage_estimates_match_full_tree",
+      "passed": true,
+      "value": 0.10938421271977224
+    },
+    {
+      "limit": 0.005,
+      "name": "corrected_strategy_memory_matches_full_tree",
+      "passed": true,
+      "value": 0.0024411943842011776
+    },
+    {
+      "expected": 1872,
+      "name": "all_reachable_information_sets_observed",
+      "observed": 1872,
+      "passed": true
+    },
+    {
+      "limit": 1.1111111111111112,
+      "name": "importance_ratios_bounded",
+      "passed": true,
+      "value": 1.0344827586206897
+    },
+    {
+      "minimum": 0.8,
+      "name": "effective_sample_fraction_healthy",
+      "passed": true,
+      "value": 0.9978124985589439
+    }
+  ],
+  "files": {
+    "estimator_validation": "estimator_validation.json",
+    "training_results": "training_results.csv",
+    "training_summary": "training_summary.csv"
+  },
+  "milestones": [
+    5,
+    10,
+    15,
+    20
+  ],
+  "passed": false,
+  "run_files": {
+    "baseline:20260811": {
+      "exploration_metrics": "not generated for epsilon=0",
+      "iteration_metrics": "runs/leduc-baseline-sampling-seed-20260811/iteration_metrics.csv",
+      "latest_checkpoint": "runs/leduc-baseline-sampling-seed-20260811/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-baseline-sampling-seed-20260811"
+    },
+    "baseline:20260812": {
+      "exploration_metrics": "not generated for epsilon=0",
+      "iteration_metrics": "runs/leduc-baseline-sampling-seed-20260812/iteration_metrics.csv",
+      "latest_checkpoint": "runs/leduc-baseline-sampling-seed-20260812/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-baseline-sampling-seed-20260812"
+    },
+    "baseline:20260813": {
+      "exploration_metrics": "not generated for epsilon=0",
+      "iteration_metrics": "runs/leduc-baseline-sampling-seed-20260813/iteration_metrics.csv",
+      "latest_checkpoint": "runs/leduc-baseline-sampling-seed-20260813/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-baseline-sampling-seed-20260813"
+    },
+    "exploratory:20260811": {
+      "exploration_metrics": "runs/leduc-exploratory-sampling-seed-20260811/exploration_metrics.csv",
+      "iteration_metrics": "runs/leduc-exploratory-sampling-seed-20260811/iteration_metrics.csv",
+      "latest_checkpoint": "runs/leduc-exploratory-sampling-seed-20260811/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-exploratory-sampling-seed-20260811"
+    },
+    "exploratory:20260812": {
+      "exploration_metrics": "runs/leduc-exploratory-sampling-seed-20260812/exploration_metrics.csv",
+      "iteration_metrics": "runs/leduc-exploratory-sampling-seed-20260812/iteration_metrics.csv",
+      "latest_checkpoint": "runs/leduc-exploratory-sampling-seed-20260812/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-exploratory-sampling-seed-20260812"
+    },
+    "exploratory:20260813": {
+      "exploration_metrics": "runs/leduc-exploratory-sampling-seed-20260813/exploration_metrics.csv",
+      "iteration_metrics": "runs/leduc-exploratory-sampling-seed-20260813/iteration_metrics.csv",
+      "latest_checkpoint": "runs/leduc-exploratory-sampling-seed-20260813/checkpoints/latest.pt",
+      "run_directory": "runs/leduc-exploratory-sampling-seed-20260813"
+    }
+  },
+  "seeds": [
+    20260811,
+    20260812,
+    20260813
+  ],
+  "training_checks": [
+    {
+      "improved_seeds": [
+        20260813
+      ],
+      "name": "matched_seed_majority_improves",
+      "passed": false,
+      "required": 2
+    },
+    {
+      "baseline": 1.1077445115779572,
+      "exploratory": 1.0913905309408007,
+      "name": "median_final_exploitability_improves",
+      "passed": true
+    }
+  ],
+  "validation_id": "deep_cfr_exploratory_sampling"
+}
