@@ -72,11 +72,13 @@ class DeepCFRTrainingConfig:
             raise TypeError("opponent_exploration_epsilon must be a real number")
         if float(self.opponent_exploration_epsilon) not in (0.0, 0.1):
             raise ValueError("opponent_exploration_epsilon must be zero or 0.1")
-        if (
-            self.opponent_exploration_epsilon > 0.0
-            and self.game_configuration_id is not GameConfigurationId.LEDUC
-        ):
-            raise ValueError("exploratory opponent sampling is validated only for Leduc")
+        if self.opponent_exploration_epsilon > 0.0 and self.game_configuration_id not in {
+            GameConfigurationId.LEDUC,
+            GameConfigurationId.MODIFIED_HULHE,
+        }:
+            raise ValueError(
+                "exploratory opponent sampling is supported only for Leduc and modified HULHE"
+            )
         if self.max_gradient_norm is not None:
             _validate_positive_real("max_gradient_norm", self.max_gradient_norm)
         if isinstance(self.dropout_probability, bool) or not isinstance(

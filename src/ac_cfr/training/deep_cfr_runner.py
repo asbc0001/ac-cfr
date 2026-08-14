@@ -36,6 +36,7 @@ from ac_cfr.persistence.files import (
 )
 from ac_cfr.persistence.results import (
     DeepCFRExplorationMetricStore,
+    DeepCFRHoldemRegionMetricStore,
     DeepCFRIterationMetricStore,
     DeepCFRMetricStore,
 )
@@ -251,6 +252,14 @@ def _execute_schedule(
     )
     if exploration_store is not None:
         exploration_store.retain_through(solver.iteration)
+    region_store = (
+        DeepCFRHoldemRegionMetricStore(run_directory / "holdem_region_metrics.csv")
+        if config.training.opponent_exploration_epsilon > 0.0
+        and config.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE
+        else None
+    )
+    if region_store is not None:
+        region_store.retain_through(solver.iteration)
     if progress_callback is not None:
         progress_callback(solver.iteration, total_iterations)
     stopped = False
@@ -307,6 +316,8 @@ def _execute_schedule(
         # past the recovered iteration if checkpoint publication did not complete.
         if exploration_store is not None:
             _record_exploration_diagnostics(exploration_store, solver, config)
+        if region_store is not None:
+            _record_holdem_region_diagnostics(region_store, solver, config)
         if should_checkpoint:
             _save_recovery_checkpoint(
                 run_directory=run_directory,
@@ -534,7 +545,11 @@ def _record_exploration_diagnostics(
     diagnostics = solver.recent_exploration_diagnostics
     store.upsert(
         {
-            "game": GameId.LEDUC.value,
+            "game": (
+                GameId.HOLD_EM.value
+                if config.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE
+                else GameId.LEDUC.value
+            ),
             "game_version": config.training.game_configuration_id.value,
             "solver": config.implementation.value,
             "run_id": config.run_id,
@@ -556,6 +571,34 @@ def _record_exploration_diagnostics(
             "effective_sample_size": diagnostics.effective_sample_size,
         }
     )
+
+
+def _record_holdem_region_diagnostics(
+    store: DeepCFRHoldemRegionMetricStore,
+    solver: NaiveDeepCFR,
+    config: DeepCFRRunConfig,
+) -> None:
+    """Persist raw and weighted coverage without classifying regions as passing."""
+    regions = getattr(solver, "recent_holdem_region_diagnostics", ())
+    for region in regions:
+        store.upsert(
+            {
+                "game": GameId.HOLD_EM.value,
+                "game_version": config.training.game_configuration_id.value,
+                "solver": config.implementation.value,
+                "run_id": config.run_id,
+                "iteration": solver.iteration,
+                "seed": config.training.seed,
+                "epsilon": config.training.opponent_exploration_epsilon,
+                "sample_kind": region.sample_kind,
+                "street": region.street,
+                "facing_wager": int(region.facing_wager),
+                "pot": region.pot,
+                "betting_level": region.betting_level,
+                "raw_samples": region.raw_samples,
+                "weighted_samples": region.weighted_samples,
+            }
+        )
 
 
 def _append_training_log(run_directory: Path, message: str) -> None:

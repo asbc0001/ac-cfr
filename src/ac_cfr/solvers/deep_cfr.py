@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from math import fsum
 from multiprocessing import get_context
 from random import Random
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 import torch
@@ -52,6 +52,22 @@ class _TraversalRandomness:
 
 
 _Traversal = Generator[_InferenceRequest, NDArray[np.float64], float]
+_HoldemPublicRegion = tuple[int, bool, int, int]
+_HoldemSampleKind = Literal["advantage", "strategy"]
+_HoldemRegion = tuple[_HoldemSampleKind, int, bool, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class HoldemRegionDiagnostics:
+    """Raw and importance-weighted samples in one public betting region."""
+
+    sample_kind: _HoldemSampleKind
+    street: int
+    facing_wager: bool
+    pot: int
+    betting_level: int
+    raw_samples: int
+    weighted_samples: float
 
 
 class _HoldemSampleSink(Protocol):
@@ -59,20 +75,28 @@ class _HoldemSampleSink(Protocol):
 
     def add_advantage(
         self,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
         state: NDArray[np.float32],
         action_mask: NDArray[np.bool],
         iteration: int,
         advantages: NDArray[np.float32],
+        sampling_weight: float,
     ) -> None: ...
 
     def add_strategy(
         self,
         player: int,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
         state: NDArray[np.float32],
         action_mask: NDArray[np.bool],
         iteration: int,
         strategy: NDArray[np.float64],
+        sampling_weight: float,
     ) -> None: ...
+
+    def record_importance_ratio(self, ratio: float) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,21 +114,84 @@ class _WorkerTask:
     traversals_per_player: int
     inference_batch_size: int
     worker_seed: int
+    opponent_exploration_epsilon: float
+
+
+@dataclass(frozen=True, slots=True)
+class _CollectedHoldemDiagnostics:
+    """Immutable exploration diagnostics returned by one collection block."""
+
+    importance_ratios: tuple[float, ...]
+    sample_weights: tuple[float, ...]
+    raw_information_sets: frozenset[InformationState]
+    weighted_information_sets: frozenset[InformationState]
+    region_raw_counts: tuple[tuple[_HoldemRegion, int], ...]
+    region_weighted_counts: tuple[tuple[_HoldemRegion, float], ...]
 
 
 @dataclass(frozen=True, slots=True)
 class _CollectedHoldemSamples:
-    """Packed worker output admitted centrally in deterministic task order."""
+    """Packed worker samples and diagnostics admitted in deterministic order."""
 
     advantage_states: NDArray[np.float16]
     advantage_masks: NDArray[np.bool]
     advantage_iterations: NDArray[np.uint32]
     advantages: NDArray[np.float32]
+    advantage_weights: NDArray[np.float32] | None
     strategy_players: NDArray[np.int8]
     strategy_states: NDArray[np.float16]
     strategy_masks: NDArray[np.bool]
     strategy_iterations: NDArray[np.uint32]
     strategies: NDArray[np.float32]
+    strategy_weights: NDArray[np.float32] | None
+    diagnostics: _CollectedHoldemDiagnostics
+
+
+class _HoldemDiagnostics:
+    """Accumulate exploration diagnostics shared by local and worker sinks."""
+
+    def __init__(self, epsilon: float) -> None:
+        self._enabled = epsilon > 0.0
+        self.importance_ratios: list[float] = []
+        self.sample_weights: list[float] = []
+        self.raw_information_sets: set[InformationState] = set()
+        self.weighted_information_sets: set[InformationState] = set()
+        self.region_raw_counts: dict[_HoldemRegion, int] = {}
+        self.region_weighted_counts: dict[_HoldemRegion, float] = {}
+
+    def record_importance_ratio(self, ratio: float) -> None:
+        if self._enabled:
+            self.importance_ratios.append(ratio)
+
+    def record_sample(
+        self,
+        sample_kind: _HoldemSampleKind,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
+        sampling_weight: float,
+    ) -> None:
+        if not self._enabled:
+            return
+        grouped_region: _HoldemRegion = (sample_kind, *region)
+        self.sample_weights.append(sampling_weight)
+        self.raw_information_sets.add(information_state)
+        self.region_raw_counts[grouped_region] = self.region_raw_counts.get(grouped_region, 0) + 1
+        self.region_weighted_counts[grouped_region] = (
+            self.region_weighted_counts.get(grouped_region, 0.0) + sampling_weight
+        )
+        if sampling_weight > 0.0:
+            self.weighted_information_sets.add(information_state)
+
+    def snapshot(self) -> _CollectedHoldemDiagnostics:
+        """Freeze the current block for local merging or worker transfer."""
+        return _CollectedHoldemDiagnostics(
+            importance_ratios=tuple(self.importance_ratios),
+            sample_weights=tuple(self.sample_weights),
+            raw_information_sets=frozenset(self.raw_information_sets),
+            weighted_information_sets=frozenset(self.weighted_information_sets),
+            region_raw_counts=tuple(self.region_raw_counts.items()),
+            region_weighted_counts=tuple(self.region_weighted_counts.items()),
+        )
 
 
 class _ReservoirSink:
@@ -114,69 +201,105 @@ class _ReservoirSink:
         self,
         advantage_reservoir: PackedAdvantageReservoir,
         strategy_reservoir: PackedStrategyReservoir,
+        opponent_exploration_epsilon: float,
     ) -> None:
         self._advantage_reservoir = advantage_reservoir
         self._strategy_reservoir = strategy_reservoir
+        self.diagnostics = _HoldemDiagnostics(opponent_exploration_epsilon)
 
     def add_advantage(
         self,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
         state: NDArray[np.float32],
         action_mask: NDArray[np.bool],
         iteration: int,
         advantages: NDArray[np.float32],
+        sampling_weight: float,
     ) -> None:
-        self._advantage_reservoir.add_values(state, action_mask, iteration, advantages)
+        self._advantage_reservoir.add_values(
+            state, action_mask, iteration, advantages, sampling_weight
+        )
+        self.diagnostics.record_sample("advantage", information_state, region, sampling_weight)
 
     def add_strategy(
         self,
         player: int,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
         state: NDArray[np.float32],
         action_mask: NDArray[np.bool],
         iteration: int,
         strategy: NDArray[np.float64],
+        sampling_weight: float,
     ) -> None:
-        self._strategy_reservoir.add_values(player, state, action_mask, iteration, strategy)
+        self._strategy_reservoir.add_values(
+            player, state, action_mask, iteration, strategy, sampling_weight
+        )
+        self.diagnostics.record_sample("strategy", information_state, region, sampling_weight)
+
+    def record_importance_ratio(self, ratio: float) -> None:
+        self.diagnostics.record_importance_ratio(ratio)
 
 
 class _ListSink:
     """Accumulate worker-local samples before packing one process result."""
 
-    def __init__(self) -> None:
+    def __init__(self, opponent_exploration_epsilon: float) -> None:
+        self._weighted_sampling = opponent_exploration_epsilon > 0.0
+        self.diagnostics = _HoldemDiagnostics(opponent_exploration_epsilon)
         self.advantage_states: list[NDArray[np.float32]] = []
         self.advantage_masks: list[NDArray[np.bool]] = []
         self.advantage_iterations: list[int] = []
         self.advantages: list[NDArray[np.float32]] = []
+        self.advantage_weights: list[float] = []
         self.strategy_players: list[int] = []
         self.strategy_states: list[NDArray[np.float32]] = []
         self.strategy_masks: list[NDArray[np.bool]] = []
         self.strategy_iterations: list[int] = []
         self.strategies: list[NDArray[np.float64]] = []
+        self.strategy_weights: list[float] = []
 
     def add_advantage(
         self,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
         state: NDArray[np.float32],
         action_mask: NDArray[np.bool],
         iteration: int,
         advantages: NDArray[np.float32],
+        sampling_weight: float,
     ) -> None:
         self.advantage_states.append(state)
         self.advantage_masks.append(action_mask)
         self.advantage_iterations.append(iteration)
         self.advantages.append(advantages)
+        if self._weighted_sampling:
+            self.advantage_weights.append(sampling_weight)
+        self.diagnostics.record_sample("advantage", information_state, region, sampling_weight)
 
     def add_strategy(
         self,
         player: int,
+        information_state: InformationState,
+        region: _HoldemPublicRegion,
         state: NDArray[np.float32],
         action_mask: NDArray[np.bool],
         iteration: int,
         strategy: NDArray[np.float64],
+        sampling_weight: float,
     ) -> None:
         self.strategy_players.append(player)
         self.strategy_states.append(state)
         self.strategy_masks.append(action_mask)
         self.strategy_iterations.append(iteration)
         self.strategies.append(strategy)
+        if self._weighted_sampling:
+            self.strategy_weights.append(sampling_weight)
+        self.diagnostics.record_sample("strategy", information_state, region, sampling_weight)
+
+    def record_importance_ratio(self, ratio: float) -> None:
+        self.diagnostics.record_importance_ratio(ratio)
 
     def packed(self, state_size: int, action_count: int) -> _CollectedHoldemSamples:
         """Convert lists into compact arrays for one ordered IPC result."""
@@ -185,11 +308,23 @@ class _ListSink:
             advantage_masks=_stack_masks(self.advantage_masks, action_count),
             advantage_iterations=np.asarray(self.advantage_iterations, dtype=np.uint32),
             advantages=_stack_values(self.advantages, action_count),
+            # Preserve the epsilon-zero worker payload by omitting unused weights.
+            advantage_weights=(
+                np.asarray(self.advantage_weights, dtype=np.float32)
+                if self._weighted_sampling
+                else None
+            ),
             strategy_players=np.asarray(self.strategy_players, dtype=np.int8),
             strategy_states=_stack_states(self.strategy_states, state_size),
             strategy_masks=_stack_masks(self.strategy_masks, action_count),
             strategy_iterations=np.asarray(self.strategy_iterations, dtype=np.uint32),
             strategies=_stack_values(self.strategies, action_count),
+            strategy_weights=(
+                np.asarray(self.strategy_weights, dtype=np.float32)
+                if self._weighted_sampling
+                else None
+            ),
+            diagnostics=self.diagnostics.snapshot(),
         )
 
 
@@ -241,6 +376,8 @@ class DeepCFR(NaiveDeepCFR):
             seed_deriver.python_rng(RngStream.RESERVOIR, 2),
             **reservoir_arguments,
         )
+        self._holdem_region_raw_counts: dict[_HoldemRegion, int] = {}
+        self._holdem_region_weighted_counts: dict[_HoldemRegion, float] = {}
 
     def _initialise_holdem(
         self,
@@ -307,6 +444,28 @@ class DeepCFR(NaiveDeepCFR):
         """Return the shared packed average-strategy reservoir."""
         return self._packed_strategy_reservoir
 
+    @property
+    def recent_holdem_region_diagnostics(self) -> tuple[HoldemRegionDiagnostics, ...]:
+        """Return exact public-region sample totals from the latest training call."""
+        return tuple(
+            HoldemRegionDiagnostics(
+                sample_kind=region[0],
+                street=region[1],
+                facing_wager=region[2],
+                pot=region[3],
+                betting_level=region[4],
+                raw_samples=self._holdem_region_raw_counts.get(region, 0),
+                weighted_samples=self._holdem_region_weighted_counts.get(region, 0.0),
+            )
+            for region in sorted(self._holdem_region_raw_counts)
+        )
+
+    def train(self, iterations: int) -> None:
+        """Run training and reset Hold'em-only region diagnostics for this call."""
+        self._holdem_region_raw_counts.clear()
+        self._holdem_region_weighted_counts.clear()
+        super().train(iterations)
+
     def training_rng_state(self) -> dict[str, object]:
         """Return mutable reservoir RNGs; trajectory streams derive from iteration IDs."""
         return {
@@ -340,6 +499,7 @@ class DeepCFR(NaiveDeepCFR):
             _ReservoirSink(
                 self._packed_advantage_reservoirs[player],
                 self._packed_strategy_reservoir,
+                self.config.opponent_exploration_epsilon,
             )
             if self._holdem_configuration is not None
             else None
@@ -382,9 +542,13 @@ class DeepCFR(NaiveDeepCFR):
                             sampled_opponent_actions={},
                             randomness=randomness,
                             sink=sink,
+                            opponent_exploration_epsilon=(self.config.opponent_exploration_epsilon),
+                            sampling_weight=1.0,
                         )
                     )
             self._resolve_traversals(traversals)
+        if sink is not None:
+            self._merge_holdem_diagnostics(sink.diagnostics.snapshot())
 
     def _collect_parallel_holdem_traversals(self, player: int, iteration: int) -> None:
         """Collect deterministic traversal ranges in spawned CPU workers."""
@@ -412,6 +576,7 @@ class DeepCFR(NaiveDeepCFR):
                     RngStream.WORKER,
                     ((iteration - 1) * 2 + player) * worker_count + worker_index,
                 ),
+                opponent_exploration_epsilon=self.config.opponent_exploration_epsilon,
             )
             for worker_index, (start, stop) in enumerate(
                 _partition_traversals(traversal_count, worker_count)
@@ -431,28 +596,62 @@ class DeepCFR(NaiveDeepCFR):
     ) -> None:
         """Admit one ordered worker block through central reservoir RNG streams."""
         advantage_reservoir = self._packed_advantage_reservoirs[player]
-        for state, mask, iteration, advantages in zip(
-            samples.advantage_states,
-            samples.advantage_masks,
-            samples.advantage_iterations,
-            samples.advantages,
-            strict=True,
+        for index, (state, mask, iteration, advantages) in enumerate(
+            zip(
+                samples.advantage_states,
+                samples.advantage_masks,
+                samples.advantage_iterations,
+                samples.advantages,
+                strict=True,
+            )
         ):
-            advantage_reservoir.add_values(state, mask, int(iteration), advantages)
-        for worker_player, state, mask, iteration, strategy in zip(
-            samples.strategy_players,
-            samples.strategy_states,
-            samples.strategy_masks,
-            samples.strategy_iterations,
-            samples.strategies,
-            strict=True,
+            sampling_weight = (
+                1.0
+                if samples.advantage_weights is None
+                else float(samples.advantage_weights[index])
+            )
+            advantage_reservoir.add_values(state, mask, int(iteration), advantages, sampling_weight)
+        for index, (worker_player, state, mask, iteration, strategy) in enumerate(
+            zip(
+                samples.strategy_players,
+                samples.strategy_states,
+                samples.strategy_masks,
+                samples.strategy_iterations,
+                samples.strategies,
+                strict=True,
+            )
         ):
+            sampling_weight = (
+                1.0 if samples.strategy_weights is None else float(samples.strategy_weights[index])
+            )
             self._packed_strategy_reservoir.add_values(
                 int(worker_player),
                 state,
                 mask,
                 int(iteration),
                 strategy,
+                sampling_weight,
+            )
+        self._merge_holdem_diagnostics(samples.diagnostics)
+
+    def _merge_holdem_diagnostics(
+        self,
+        diagnostics: _CollectedHoldemDiagnostics,
+    ) -> None:
+        """Merge one local or worker diagnostic block into the current iteration."""
+        if self.config.opponent_exploration_epsilon == 0.0:
+            return
+        self._importance_ratios.extend(diagnostics.importance_ratios)
+        self._sample_weights.extend(diagnostics.sample_weights)
+        self._raw_information_sets.update(diagnostics.raw_information_sets)
+        self._weighted_information_sets.update(diagnostics.weighted_information_sets)
+        for region, count in diagnostics.region_raw_counts:
+            self._holdem_region_raw_counts[region] = (
+                self._holdem_region_raw_counts.get(region, 0) + count
+            )
+        for region, weight in diagnostics.region_weighted_counts:
+            self._holdem_region_weighted_counts[region] = (
+                self._holdem_region_weighted_counts.get(region, 0.0) + weight
             )
 
     def _resolve_traversals(self, traversals: list[_Traversal]) -> None:
@@ -749,7 +948,7 @@ def _collect_holdem_worker(task: _WorkerTask) -> _CollectedHoldemSamples:
     torch.set_num_threads(1)
     torch.manual_seed(task.worker_seed)
     networks = tuple(_worker_network(task.model_config, state) for state in task.network_states)
-    sink = _ListSink()
+    sink = _ListSink(task.opponent_exploration_epsilon)
     game = HoldemGame()
     for start in range(
         task.traversal_start,
@@ -770,6 +969,8 @@ def _collect_holdem_worker(task: _WorkerTask) -> _CollectedHoldemSamples:
                     task.traversals_per_player,
                 ),
                 sink=sink,
+                opponent_exploration_epsilon=task.opponent_exploration_epsilon,
+                sampling_weight=1.0,
             )
             for traversal_index in range(
                 start,
@@ -859,6 +1060,8 @@ def _traverse_holdem_batched(
     sampled_opponent_actions: dict[InformationState, int],
     randomness: _TraversalRandomness,
     sink: _HoldemSampleSink,
+    opponent_exploration_epsilon: float,
+    sampling_weight: float,
 ) -> _Traversal:
     """Traverse one on-demand Hold'em trajectory into the supplied sample sink."""
     if state.is_terminal:
@@ -874,6 +1077,8 @@ def _traverse_holdem_batched(
                 sampled_opponent_actions=sampled_opponent_actions,
                 randomness=randomness,
                 sink=sink,
+                opponent_exploration_epsilon=opponent_exploration_epsilon,
+                sampling_weight=sampling_weight,
             )
         )
 
@@ -884,28 +1089,55 @@ def _traverse_holdem_batched(
     neural_state = encode_holdem_information_state(information_state)
     action_mask = holdem_action_mask(information_state.legal_actions)
     strategy = yield _InferenceRequest(neural_state, action_mask, acting_player)
+    region = _holdem_region(state)
 
     if acting_player != traverser:
-        sink.add_strategy(acting_player, neural_state, action_mask, iteration, strategy)
+        # Store the target policy with only the likelihood correction accumulated
+        # before this state; the current exploratory action has not yet been drawn.
+        sink.add_strategy(
+            acting_player,
+            information_state,
+            region,
+            neural_state,
+            action_mask,
+            iteration,
+            strategy,
+            sampling_weight,
+        )
+        local_probabilities = np.asarray(
+            [strategy[int(action)] for action in information_state.legal_actions],
+            dtype=np.float64,
+        )
         action_position = sampled_opponent_actions.get(information_state)
         if action_position is None:
-            local_probabilities = np.asarray(
-                [strategy[int(action)] for action in information_state.legal_actions],
-                dtype=np.float64,
+            # Exploration changes only the behaviour distribution used to draw
+            # this action; strategy memory above still stores the true policy.
+            behaviour_probabilities = exploratory_opponent_probabilities(
+                local_probabilities,
+                opponent_exploration_epsilon,
             )
-            action_position = _sample_position(local_probabilities, randomness.policy)
+            action_position = _sample_position(
+                np.asarray(behaviour_probabilities), randomness.policy
+            )
             sampled_opponent_actions[information_state] = action_position
-        action = information_state.legal_actions[action_position]
-        return (
-            yield from _traverse_holdem_batched(
-                state=state.apply_action(action),
-                traverser=traverser,
-                iteration=iteration,
-                sampled_opponent_actions=sampled_opponent_actions,
-                randomness=randomness,
-                sink=sink,
-            )
+        ratio = opponent_importance_ratio(
+            local_probabilities,
+            action_position,
+            opponent_exploration_epsilon,
         )
+        sink.record_importance_ratio(ratio)
+        action = information_state.legal_actions[action_position]
+        child_value = yield from _traverse_holdem_batched(
+            state=state.apply_action(action),
+            traverser=traverser,
+            iteration=iteration,
+            sampled_opponent_actions=sampled_opponent_actions,
+            randomness=randomness,
+            sink=sink,
+            opponent_exploration_epsilon=opponent_exploration_epsilon,
+            sampling_weight=sampling_weight * ratio,
+        )
+        return child_value if opponent_exploration_epsilon == 0.0 else ratio * child_value
 
     action_values: list[float] = []
     for action in information_state.legal_actions:
@@ -916,6 +1148,8 @@ def _traverse_holdem_batched(
             sampled_opponent_actions=sampled_opponent_actions,
             randomness=randomness,
             sink=sink,
+            opponent_exploration_epsilon=opponent_exploration_epsilon,
+            sampling_weight=sampling_weight,
         )
         action_values.append(action_value)
     local_strategy = tuple(
@@ -932,8 +1166,23 @@ def _traverse_holdem_batched(
         strict=True,
     ):
         advantages[int(action)] = action_value - node_value
-    sink.add_advantage(neural_state, action_mask, iteration, advantages)
+    # Ratios below this state are already included in the sampled return. This
+    # loss weight corrects only the exploratory probability of reaching it.
+    sink.add_advantage(
+        information_state,
+        region,
+        neural_state,
+        action_mask,
+        iteration,
+        advantages,
+        sampling_weight,
+    )
     return node_value
+
+
+def _holdem_region(state: HoldemState) -> _HoldemPublicRegion:
+    """Return exact public betting coordinates without imposing pass thresholds."""
+    return int(state.street), state.amount_to_call > 0, state.pot, state.betting_level
 
 
 def _trajectory_randomness(

@@ -41,7 +41,7 @@ _LOSS_FIELDS = (
 def test_modified_hulhe_optimised_pipeline_resumes_and_loads_for_play(
     tmp_path: Path,
 ) -> None:
-    config = _run_config()
+    config = _run_config(opponent_exploration_epsilon=0.1)
     outcome = start_deep_cfr_training(config, runs_root=tmp_path)
     game = HoldemConfig.modified()
     first_checkpoint = outcome.run_directory / "checkpoints" / "iter_1.pt"
@@ -49,7 +49,8 @@ def test_modified_hulhe_optimised_pipeline_resumes_and_loads_for_play(
     assert type(loaded_checkpoint.solver) is DeepCFR
     assert loaded_checkpoint.solver.iteration == 1
     assert loaded_checkpoint.metadata["game_version"] == "modified_hulhe"
-    assert loaded_checkpoint.solver.advantage_reservoirs[0].bytes_per_sample == 421
+    assert loaded_checkpoint.solver.advantage_reservoirs[0].bytes_per_sample == 425
+    assert loaded_checkpoint.solver.advantage_reservoirs[0].sampling_weights is not None
 
     resumed = resume_deep_cfr_training(first_checkpoint)
     assert resumed.final_iteration == 2
@@ -59,6 +60,8 @@ def test_modified_hulhe_optimised_pipeline_resumes_and_loads_for_play(
     for record in records:
         for field in _LOSS_FIELDS:
             assert isfinite(float(record[field]))
+    assert (outcome.run_directory / "exploration_metrics.csv").is_file()
+    assert (outcome.run_directory / "holdem_region_metrics.csv").is_file()
 
     snapshot_path = (
         outcome.run_directory / "strategy_snapshots" / "modified_hulhe_integration_iter_2.pt"
@@ -112,8 +115,9 @@ def test_modified_hulhe_calibration_reuses_one_fixed_reservoir(tmp_path: Path) -
     assert metadata["collection"]["reservoir_digest"] == batch_records[0]["reservoir_digest"]
 
 
-def test_parallel_holdem_collection_preserves_seeded_sample_multiset() -> None:
-    config = _run_config().training
+@pytest.mark.parametrize("epsilon", [0.0, 0.1])
+def test_parallel_holdem_collection_preserves_seeded_sample_multiset(epsilon: float) -> None:
+    config = _run_config(opponent_exploration_epsilon=epsilon).training
     game = HoldemConfig.modified()
     single = DeepCFR(
         game,
@@ -145,9 +149,45 @@ def test_parallel_holdem_collection_preserves_seeded_sample_multiset() -> None:
     assert sorted(map(repr, single.strategy_reservoir.samples)) == sorted(
         map(repr, parallel.strategy_reservoir.samples)
     )
+    if epsilon == 0.0:
+        assert single.advantage_reservoirs[0].sampling_weights is None
+        assert single.recent_exploration_diagnostics.opponent_actions_sampled == 0
+        assert single.recent_holdem_region_diagnostics == ()
+        return
+
+    diagnostics = single.recent_exploration_diagnostics
+    parallel_diagnostics = parallel.recent_exploration_diagnostics
+    assert diagnostics.opponent_actions_sampled == parallel_diagnostics.opponent_actions_sampled
+    assert diagnostics.samples == parallel_diagnostics.samples
+    assert diagnostics.effective_sample_size == pytest.approx(
+        parallel_diagnostics.effective_sample_size
+    )
+    single_regions = single.recent_holdem_region_diagnostics
+    parallel_regions = parallel.recent_holdem_region_diagnostics
+    assert [
+        (region.sample_kind, region.street, region.facing_wager, region.pot, region.betting_level)
+        for region in single_regions
+    ] == [
+        (region.sample_kind, region.street, region.facing_wager, region.pot, region.betting_level)
+        for region in parallel_regions
+    ]
+    assert [region.raw_samples for region in single_regions] == [
+        region.raw_samples for region in parallel_regions
+    ]
+    assert [region.weighted_samples for region in single_regions] == pytest.approx(
+        [region.weighted_samples for region in parallel_regions]
+    )
+    assert diagnostics.opponent_actions_sampled > 0
+    assert diagnostics.samples > 0
+    assert diagnostics.effective_sample_size > 0.0
+    assert isfinite(diagnostics.ratio_max)
+    assert isfinite(diagnostics.sampling_weight_max)
+    assert all(
+        isfinite(region.weighted_samples) for region in single.recent_holdem_region_diagnostics
+    )
 
 
-def _run_config() -> DeepCFRRunConfig:
+def _run_config(*, opponent_exploration_epsilon: float = 0.0) -> DeepCFRRunConfig:
     """Return the smallest shared modified-HULHE lifecycle configuration."""
     training = DeepCFRTrainingConfig(
         iterations=2,
@@ -160,6 +200,8 @@ def _run_config() -> DeepCFRRunConfig:
         strategy_batch_size=4,
         learning_rate=1e-3,
         validation_fraction=0.1,
+        validation_split_id="sample",
+        opponent_exploration_epsilon=opponent_exploration_epsilon,
         max_gradient_norm=1.0,
         dropout_probability=0.0,
         seed=2026,

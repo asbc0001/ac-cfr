@@ -107,6 +107,33 @@ DEEP_CFR_EXPLORATION_FIELDS: Final = (
 )
 DEEP_CFR_EXPLORATION_KEY_FIELDS: Final = ("run_id", "iteration", "seed")
 
+DEEP_CFR_HOLDEM_REGION_FIELDS: Final = (
+    "game",
+    "game_version",
+    "solver",
+    "run_id",
+    "iteration",
+    "seed",
+    "epsilon",
+    "sample_kind",
+    "street",
+    "facing_wager",
+    "pot",
+    "betting_level",
+    "raw_samples",
+    "weighted_samples",
+)
+DEEP_CFR_HOLDEM_REGION_KEY_FIELDS: Final = (
+    "run_id",
+    "iteration",
+    "seed",
+    "sample_kind",
+    "street",
+    "facing_wager",
+    "pot",
+    "betting_level",
+)
+
 EVALUATION_RESULT_FIELDS: Final = (
     "game",
     "game_version",
@@ -314,7 +341,7 @@ class DeepCFRIterationMetricStore:
 
 
 class DeepCFRExplorationMetricStore:
-    """Store importance-weight and coverage diagnostics for exploratory Leduc runs."""
+    """Store importance-weight and coverage diagnostics for exploratory runs."""
 
     __slots__ = ("_store",)
 
@@ -327,6 +354,30 @@ class DeepCFRExplorationMetricStore:
 
     def upsert(self, values: dict[str, object]) -> None:
         """Insert or replace one completed-iteration exploration record."""
+        self._store.upsert(values)
+
+    def retain_through(self, iteration: int) -> None:
+        """Discard records newer than a resumed recovery checkpoint."""
+        records: list[dict[str, object]] = [
+            dict(record) for record in self._store.records if int(record["iteration"]) <= iteration
+        ]
+        self._store.replace(records)
+
+
+class DeepCFRHoldemRegionMetricStore:
+    """Store exact public betting-region coverage for exploratory Hold'em runs."""
+
+    __slots__ = ("_store",)
+
+    def __init__(self, path: Path) -> None:
+        self._store = _CsvRecordStore(
+            path,
+            fields=DEEP_CFR_HOLDEM_REGION_FIELDS,
+            key_fields=DEEP_CFR_HOLDEM_REGION_KEY_FIELDS,
+        )
+
+    def upsert(self, values: dict[str, object]) -> None:
+        """Insert or replace one completed-iteration region record."""
         self._store.upsert(values)
 
     def retain_through(self, iteration: int) -> None:
@@ -449,7 +500,7 @@ def _record_sort_key(record: ResultRecord) -> tuple[str | int, ...]:
         record["solver"],
         record["run_id"],
         int(record["iteration"]),
-        record["strategy_snapshot_id"],
+        record.get("strategy_snapshot_id", ""),
         int(record["seed"]),
     )
 

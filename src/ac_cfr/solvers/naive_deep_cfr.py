@@ -1,6 +1,6 @@
 """Reference external-sampling Deep CFR for Leduc poker."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from hashlib import blake2b
 from math import fsum, isfinite
@@ -199,8 +199,8 @@ class NaiveDeepCFR:
         self._strategy_training_seconds = 0.0
         self._importance_ratios: list[float] = []
         self._sample_weights: list[float] = []
-        self._raw_information_sets: set[int] = set()
-        self._weighted_information_sets: set[int] = set()
+        self._raw_information_sets: set[Hashable] = set()
+        self._weighted_information_sets: set[Hashable] = set()
 
     @property
     def iteration(self) -> int:
@@ -522,7 +522,7 @@ class NaiveDeepCFR:
         self._record_sample(information_set_id, sampling_weight)
         return node_value
 
-    def _record_sample(self, information_set_id: int, sampling_weight: float) -> None:
+    def _record_sample(self, information_set_id: Hashable, sampling_weight: float) -> None:
         if self._config.opponent_exploration_epsilon == 0.0:
             return
         self._sample_weights.append(sampling_weight)

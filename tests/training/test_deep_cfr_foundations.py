@@ -151,8 +151,8 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
     assert holdem.runtime.storage_budget_bytes == 200_000_000_000
     assert holdem.checkpoint_retention == 2
     assert type(holdem).from_dict(holdem.to_dict()) == holdem
-    with pytest.raises(ValueError, match="only for Leduc"):
-        replace(holdem.training, opponent_exploration_epsilon=0.1)
+    exploratory_holdem = replace(holdem.training, opponent_exploration_epsilon=0.1)
+    assert exploratory_holdem.opponent_exploration_epsilon == 0.1
 
     cloud_smoke = load_deep_cfr_run_config(
         preset.parents[0] / "modified_hulhe_cloud_smoke.toml",
