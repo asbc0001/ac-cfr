@@ -90,12 +90,15 @@ async def test_browser_assets_are_served_without_persistent_client_state() -> No
     assert "https://github.com/asbc0001/ac-cfr" in page.text
     assert "strategy-select" in page.text
     assert "policy-details" in page.text
+    assert "net-result" in page.text
     assert "action-buttons" in page.text
     assert "opponent-cards" in page.text
     assert "localStorage" not in script.text
     assert "sessionStorage" not in script.text
     assert "/api/strategies" in script.text
     assert "expected_version" in script.text
+    assert "human_utility" in script.text
+    assert "completedHandIds" in script.text
     assert "Training iterations:" in script.text
     assert "Exact exploitability:" in script.text
     assert 'rank === "T" ? "10" : rank' in script.text

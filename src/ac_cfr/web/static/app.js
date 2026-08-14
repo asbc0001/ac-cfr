@@ -15,6 +15,7 @@ const elements = {
   table: document.querySelector("#table"),
   heading: document.querySelector("#table-heading"),
   turnStatus: document.querySelector("#turn-status"),
+  netResult: document.querySelector("#net-result"),
   humanPosition: document.querySelector("#human-position"),
   aiPosition: document.querySelector("#ai-position"),
   pot: document.querySelector("#pot"),
@@ -79,6 +80,11 @@ const gameRules = {
 let strategies = [];
 let currentHand = null;
 let requestPending = false;
+// Page-memory state survives New hand without creating persistent browser data.
+let trackedStrategyId = null;
+let netResult = 0;
+let completedHandCount = 0;
+const completedHandIds = new Set();
 
 function option(value, label) {
   const item = document.createElement("option");
@@ -126,6 +132,36 @@ function updatePolicies() {
 
 function formatMetric(value) {
   return value.toLocaleString(undefined, { maximumSignificantDigits: 4 });
+}
+
+function renderNetResult() {
+  const sign = netResult > 0 ? "+" : "";
+  const handLabel = completedHandCount === 1 ? "hand" : "hands";
+  elements.netResult.textContent =
+    `Net: ${sign}${formatMetric(netResult)} chips · ${completedHandCount} ${handLabel}`;
+}
+
+function resetNetResult() {
+  trackedStrategyId = elements.strategy.value || null;
+  netResult = 0;
+  completedHandCount = 0;
+  completedHandIds.clear();
+  renderNetResult();
+}
+
+function recordTerminalResult() {
+  if (
+    !currentHand.terminal ||
+    currentHand.human_utility === null ||
+    currentHand.strategy_id !== trackedStrategyId ||
+    completedHandIds.has(currentHand.hand_id)
+  ) {
+    return;
+  }
+  completedHandIds.add(currentHand.hand_id);
+  netResult += currentHand.human_utility;
+  completedHandCount += 1;
+  renderNetResult();
 }
 
 function renderPolicyDetails() {
@@ -217,6 +253,9 @@ async function startHand() {
       method: "POST",
       body: JSON.stringify({ strategy_id: elements.strategy.value }),
     });
+    if (trackedStrategyId !== currentHand.strategy_id) {
+      resetNetResult();
+    }
     renderHand();
     showStatus("");
   } catch (error) {
@@ -450,6 +489,22 @@ function renderHand() {
   renderAIDecision();
   renderHistory();
   renderTerminalSummary();
+  recordTerminalResult();
+}
+
+function handleGameChange() {
+  updateAgents();
+  resetNetResult();
+}
+
+function handleAgentChange() {
+  updatePolicies();
+  resetNetResult();
+}
+
+function handleStrategyChange() {
+  renderPolicyDetails();
+  resetNetResult();
 }
 
 async function initialise() {
@@ -464,9 +519,9 @@ async function initialise() {
   }
 }
 
-elements.game.addEventListener("change", updateAgents);
-elements.agent.addEventListener("change", updatePolicies);
-elements.strategy.addEventListener("change", renderPolicyDetails);
+elements.game.addEventListener("change", handleGameChange);
+elements.agent.addEventListener("change", handleAgentChange);
+elements.strategy.addEventListener("change", handleStrategyChange);
 elements.rulesButton.addEventListener("click", showGameRules);
 elements.start.addEventListener("click", startHand);
 initialise();

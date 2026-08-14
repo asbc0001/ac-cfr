@@ -265,8 +265,9 @@ dialog::backdrop {
 }
 
 .hand-status {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   margin-top: 1.25rem;
   padding: 0.75rem 1rem;
   border: 1px solid var(--line);
@@ -276,6 +277,15 @@ dialog::backdrop {
 
 .hand-status strong:first-child {
   color: var(--success);
+}
+
+.net-result {
+  color: var(--muted);
+  text-align: center;
+}
+
+.hand-status strong:last-child {
+  justify-self: end;
 }
 
 .cards-section {
@@ -522,6 +532,15 @@ footer p {
   .control-panel {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .hand-status {
+    grid-template-columns: 1fr auto;
+  }
+
+  .net-result {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .cards-section,
