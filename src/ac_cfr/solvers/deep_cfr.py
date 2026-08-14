@@ -683,6 +683,7 @@ class DeepCFR(NaiveDeepCFR):
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
             strategy_targets=strategy_targets,
             validation_fraction=self.config.validation_fraction,
+            validation_split_id=self.config.validation_split_id,
             max_gradient_norm=self.config.max_gradient_norm,
         )
 

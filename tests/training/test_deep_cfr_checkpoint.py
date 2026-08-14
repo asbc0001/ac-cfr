@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ import torch
 
 from ac_cfr.games.leduc import LeducConfig, LeducGame
 from ac_cfr.games.tree import compile_game_tree
+from ac_cfr.persistence import files as persistence_files
 from ac_cfr.persistence.deep_cfr_checkpoints import (
     load_deep_cfr_checkpoint,
     save_deep_cfr_checkpoint,
@@ -34,6 +36,66 @@ def _config() -> DeepCFRTrainingConfig:
 
 def _runtime() -> DeepCFRRuntimeConfig:
     return DeepCFRRuntimeConfig(inference_batch_size=64, cpu_threads=1, device="cpu")
+
+
+def test_staged_checkpoint_publication_retries_transient_io_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "remote" / "checkpoint.pt"
+    staging_directory = tmp_path / "local"
+    publish_once = persistence_files._publish_staged_file_once
+    attempts = 0
+
+    def flaky_publish(staged_path: Path, staged_digest: bytes, path: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError(errno.EIO, "simulated transient storage failure")
+        publish_once(staged_path, staged_digest, path)
+
+    monkeypatch.setattr(persistence_files, "_CHECKPOINT_RETRY_DELAYS_SECONDS", (0.0,))
+    monkeypatch.setattr(persistence_files, "_publish_staged_file_once", flaky_publish)
+
+    with persistence_files.staged_atomic_binary_writer(
+        target,
+        staging_directory=staging_directory,
+    ) as output_file:
+        output_file.write(b"complete checkpoint")
+
+    assert attempts == 2
+    assert target.read_bytes() == b"complete checkpoint"
+    assert not list(staging_directory.glob("*.staged"))
+
+
+def test_staged_checkpoint_exhaustion_preserves_old_target_and_local_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "remote" / "checkpoint.pt"
+    target.parent.mkdir()
+    target.write_bytes(b"previous checkpoint")
+    staging_directory = tmp_path / "local"
+
+    def failed_publish(staged_path: Path, staged_digest: bytes, path: Path) -> None:
+        raise OSError(errno.EIO, "simulated persistent storage failure")
+
+    monkeypatch.setattr(persistence_files, "_CHECKPOINT_RETRY_DELAYS_SECONDS", (0.0,))
+    monkeypatch.setattr(persistence_files, "_publish_staged_file_once", failed_publish)
+
+    with (
+        pytest.raises(OSError, match="persistent storage failure"),
+        persistence_files.staged_atomic_binary_writer(
+            target,
+            staging_directory=staging_directory,
+        ) as output_file,
+    ):
+        output_file.write(b"new checkpoint")
+
+    staged_paths = list(staging_directory.glob("*.staged"))
+    assert target.read_bytes() == b"previous checkpoint"
+    assert len(staged_paths) == 1
+    assert staged_paths[0].read_bytes() == b"new checkpoint"
 
 
 def test_interrupted_deep_cfr_resume_matches_uninterrupted_training(tmp_path: Path) -> None:

@@ -23,7 +23,7 @@ from ac_cfr.persistence.compatibility import (
     holdem_compatibility_digest,
     tree_compatibility_digest,
 )
-from ac_cfr.persistence.files import atomic_binary_writer
+from ac_cfr.persistence.files import staged_atomic_binary_writer
 from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
@@ -145,7 +145,7 @@ def save_deep_cfr_checkpoint(
             "metric_records": [record.copy() for record in metric_records],
         },
     }
-    with atomic_binary_writer(path) as checkpoint_file:
+    with staged_atomic_binary_writer(path) as checkpoint_file:
         torch.save(payload, checkpoint_file)
 
 

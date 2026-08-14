@@ -10,7 +10,7 @@ from ac_cfr.common.environment import effective_cpu_count
 from ac_cfr.training.config import DeepCFRRuntimeConfig, DeepCFRTrainingConfig
 from ac_cfr.training.deep_cfr_runner import DeepCFRRunConfig
 
-_FORMAT_VERSION = 4
+_FORMAT_VERSION = 5
 _RUN_FIELDS = {"implementation", "checkpoint_interval", "checkpoint_retention"}
 _VERSION_TWO_RUN_FIELDS = _RUN_FIELDS - {"checkpoint_retention"}
 _TRAINING_FIELDS = {
@@ -24,6 +24,7 @@ _TRAINING_FIELDS = {
     "strategy_batch_size",
     "learning_rate",
     "validation_fraction",
+    "validation_split_id",
     "max_gradient_norm",
     "dropout_probability",
     "seed",
@@ -33,7 +34,8 @@ _TRAINING_FIELDS = {
     "state_encoding_id",
     "optimizer_id",
 }
-_LEGACY_TRAINING_FIELDS = _TRAINING_FIELDS - {
+_VERSION_FOUR_TRAINING_FIELDS = _TRAINING_FIELDS - {"validation_split_id"}
+_LEGACY_TRAINING_FIELDS = _VERSION_FOUR_TRAINING_FIELDS - {
     "advantage_batch_size",
     "strategy_batch_size",
     "game_configuration_id",
@@ -65,24 +67,30 @@ def load_deep_cfr_run_config(
     format_version = values["format_version"]
     if isinstance(format_version, bool) or not isinstance(format_version, int):
         raise ValueError("Deep CFR configuration format_version is incompatible")
-    if format_version not in (1, 2, 3, _FORMAT_VERSION):
+    if format_version not in (1, 2, 3, 4, _FORMAT_VERSION):
         raise ValueError("Deep CFR configuration format_version is incompatible")
 
-    current_format = format_version == _FORMAT_VERSION
     run = _strict_table(
         values["run"], _RUN_FIELDS if format_version >= 3 else _VERSION_TWO_RUN_FIELDS, "run"
     )
     run.setdefault("checkpoint_retention", 2)
-    training_fields = _LEGACY_TRAINING_FIELDS if format_version == 1 else _TRAINING_FIELDS
+    training_fields = (
+        _LEGACY_TRAINING_FIELDS
+        if format_version == 1
+        else _VERSION_FOUR_TRAINING_FIELDS
+        if format_version <= 4
+        else _TRAINING_FIELDS
+    )
     training = _strict_table(values["training"], training_fields, "training")
     if format_version == 1:
         batch_size = training.pop("training_batch_size")
         training["advantage_batch_size"] = batch_size
         training["strategy_batch_size"] = batch_size
         training["game_configuration_id"] = "leduc"
+    training.setdefault("validation_split_id", "sample")
     runtime_fields = (
         _RUNTIME_FIELDS
-        if current_format
+        if format_version >= 4
         else _VERSION_THREE_RUNTIME_FIELDS
         if format_version == 3
         else _VERSION_TWO_RUNTIME_FIELDS

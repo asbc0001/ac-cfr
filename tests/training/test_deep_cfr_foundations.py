@@ -45,6 +45,7 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
     assert config.model_config_id is ModelConfigId.LEDUC_DEEP_CFR
     assert config.state_encoding_id is StateEncodingId.LEDUC_NEURAL
     assert config.validation_fraction == 0.1
+    assert config.validation_split_id == "sample"
     assert config.max_gradient_norm == 10.0
     assert config.dropout_probability == 0.0
     assert config.to_dict()["snapshot_iterations"] == [25, 100]
@@ -112,6 +113,7 @@ def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(
         run_id="modified_hulhe_calibration",
     )
     assert holdem.training.game_configuration_id is GameConfigurationId.MODIFIED_HULHE
+    assert holdem.training.validation_split_id == "sample"
     assert holdem.training.traversals_per_player == 10_000
     assert holdem.training.advantage_training_steps == 16_000
     assert holdem.training.strategy_training_steps == 16_000

@@ -29,7 +29,11 @@ from ac_cfr.persistence.deep_cfr_snapshots import (
     deep_cfr_policy,
     export_deep_cfr_snapshot,
 )
-from ac_cfr.persistence.files import atomic_text_writer, write_json
+from ac_cfr.persistence.files import (
+    atomic_text_writer,
+    checkpoint_staging_directory,
+    write_json,
+)
 from ac_cfr.persistence.results import DeepCFRIterationMetricStore, DeepCFRMetricStore
 from ac_cfr.solvers.deep_cfr_selection import deep_cfr_implementation, deep_cfr_solver_type
 from ac_cfr.solvers.naive_deep_cfr import NaiveDeepCFR, NetworkTrainingMetrics
@@ -568,6 +572,14 @@ def _require_checkpoint_space(directory: Path, solver: NaiveDeepCFR) -> None:
     )
     estimated_bytes = occupied_bytes + network_bytes
     required_bytes = int(estimated_bytes * 1.1) + 64 * 1024 * 1024
+    staging_directory = checkpoint_staging_directory()
+    staging_directory.mkdir(parents=True, exist_ok=True)
+    staging_free_bytes = psutil.disk_usage(str(staging_directory)).free
+    if staging_free_bytes < required_bytes:
+        raise RuntimeError(
+            "insufficient local checkpoint staging space: "
+            f"requires {required_bytes} bytes, found {staging_free_bytes}"
+        )
     free_bytes = effective_storage_remaining_bytes(
         directory,
         solver.runtime.storage_budget_bytes,
