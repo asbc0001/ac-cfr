@@ -2,7 +2,9 @@
 
 from ac_cfr.evaluation.best_response import ExactEvaluator
 from ac_cfr.evaluation.holdem_h2h import (
+    HoldemDuplicateDifferenceResult,
     HoldemDuplicateResult,
+    evaluate_holdem_duplicate_difference,
     evaluate_holdem_duplicate_match,
 )
 from ac_cfr.evaluation.metrics import StrategyMetrics, evaluate_strategy
@@ -11,9 +13,11 @@ from ac_cfr.evaluation.self_play import DuplicateSelfPlayResult, evaluate_duplic
 __all__ = (
     "DuplicateSelfPlayResult",
     "ExactEvaluator",
+    "HoldemDuplicateDifferenceResult",
     "HoldemDuplicateResult",
     "StrategyMetrics",
     "evaluate_duplicate_self_play",
+    "evaluate_holdem_duplicate_difference",
     "evaluate_holdem_duplicate_match",
     "evaluate_strategy",
 )

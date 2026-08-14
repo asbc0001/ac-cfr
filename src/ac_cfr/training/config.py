@@ -34,6 +34,7 @@ class DeepCFRTrainingConfig:
     model_config_id: ModelConfigId = ModelConfigId.LEDUC_DEEP_CFR
     state_encoding_id: StateEncodingId = StateEncodingId.LEDUC_NEURAL
     optimizer_id: OptimizerId = OptimizerId.ADAM
+    validation_split_id: str = "sample"
 
     def __post_init__(self) -> None:
         for name in (
@@ -57,6 +58,13 @@ class DeepCFRTrainingConfig:
             raise TypeError("validation_fraction must be a real number")
         if not isfinite(self.validation_fraction) or not 0.0 <= self.validation_fraction < 1.0:
             raise ValueError("validation_fraction must be finite and between zero and one")
+        if self.validation_split_id not in {"sample", "holdem_information_state"}:
+            raise ValueError("validation_split_id is unsupported")
+        if (
+            self.validation_split_id == "holdem_information_state"
+            and self.game_configuration_id is not GameConfigurationId.MODIFIED_HULHE
+        ):
+            raise ValueError("grouped information-state validation requires modified HULHE")
         if self.max_gradient_norm is not None:
             _validate_positive_real("max_gradient_norm", self.max_gradient_norm)
         if isinstance(self.dropout_probability, bool) or not isinstance(
@@ -130,12 +138,13 @@ class DeepCFRTrainingConfig:
             "state_encoding_id",
             "optimizer_id",
         }
-        current_fields = legacy_fields - {"training_batch_size"} | {
+        version_four_fields = legacy_fields - {"training_batch_size"} | {
             "advantage_batch_size",
             "strategy_batch_size",
             "game_configuration_id",
         }
-        if set(values) not in (legacy_fields, current_fields):
+        current_fields = version_four_fields | {"validation_split_id"}
+        if set(values) not in (legacy_fields, version_four_fields, current_fields):
             raise ValueError("Deep CFR training configuration fields are incompatible")
         parsed = values.copy()
         if set(values) == legacy_fields:
@@ -143,6 +152,8 @@ class DeepCFRTrainingConfig:
             parsed["advantage_batch_size"] = batch_size
             parsed["strategy_batch_size"] = batch_size
             parsed["game_configuration_id"] = GameConfigurationId.LEDUC.value
+        if "validation_split_id" not in parsed:
+            parsed["validation_split_id"] = "sample"
         snapshots = parsed["snapshot_iterations"]
         if not isinstance(snapshots, list):
             raise ValueError("snapshot_iterations must be stored as a list")

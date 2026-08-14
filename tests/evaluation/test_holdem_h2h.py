@@ -3,7 +3,10 @@ from pathlib import Path
 import pytest
 
 from ac_cfr.agents import BaselineAgent
-from ac_cfr.evaluation import evaluate_holdem_duplicate_match
+from ac_cfr.evaluation import (
+    evaluate_holdem_duplicate_difference,
+    evaluate_holdem_duplicate_match,
+)
 from ac_cfr.evaluation.holdem_h2h import PAIRED_BOOTSTRAP_METHOD
 from ac_cfr.persistence.results import HoldemH2HResultStore
 
@@ -68,3 +71,20 @@ def test_modified_hulhe_results_upsert_by_complete_protocol(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match="hand or iteration"):
         store.upsert({**record, "hands": 199})
+
+
+def test_duplicate_difference_is_exactly_neutral_for_identical_focal_policies() -> None:
+    difference = evaluate_holdem_duplicate_difference(
+        BaselineAgent(),
+        BaselineAgent(),
+        BaselineAgent(),
+        duplicate_pairs=20,
+        seed=20260811,
+        confidence_level=0.95,
+        bootstrap_resamples=100,
+    )
+
+    assert difference.first_minus_second_mbb_per_game == 0.0
+    assert difference.confidence_interval_low == 0.0
+    assert difference.confidence_interval_high == 0.0
+    assert difference.includes_zero

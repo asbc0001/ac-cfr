@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import blake2b
 from math import fsum, isfinite
 from random import Random
 from time import perf_counter
@@ -465,6 +466,7 @@ class NaiveDeepCFR:
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
             strategy_targets=False,
             validation_fraction=self._config.validation_fraction,
+            validation_split_id=self._config.validation_split_id,
             max_gradient_norm=self._config.max_gradient_norm,
         )
         self._training_metrics.append(
@@ -495,6 +497,7 @@ class NaiveDeepCFR:
             training_seed=self._seed(RngStream.NETWORK_TRAINING, seed_index),
             strategy_targets=True,
             validation_fraction=self._config.validation_fraction,
+            validation_split_id=self._config.validation_split_id,
             max_gradient_norm=self._config.max_gradient_norm,
         )
         self._training_metrics.append(
@@ -608,6 +611,7 @@ def _train_network(
     strategy_targets: bool,
     validation_fraction: float,
     max_gradient_norm: float | None,
+    validation_split_id: str = "sample",
 ) -> _LossMetrics:
     """Train one network with deterministic uniform reservoir minibatches."""
     if not samples:
@@ -637,6 +641,7 @@ def _train_network(
         strategy_targets=strategy_targets,
         validation_fraction=validation_fraction,
         max_gradient_norm=max_gradient_norm,
+        validation_split_id=validation_split_id,
     )
 
 
@@ -656,6 +661,7 @@ def _train_network_tensors(
     strategy_targets: bool,
     validation_fraction: float,
     max_gradient_norm: float | None,
+    validation_split_id: str = "sample",
 ) -> _LossMetrics:
     """Train directly from packed sample tensors with the reference loss and schedule."""
     point = train_network_tensor_milestones(
@@ -673,6 +679,7 @@ def _train_network_tensors(
         strategy_targets=strategy_targets,
         validation_fraction=validation_fraction,
         max_gradient_norm=max_gradient_norm,
+        validation_split_id=validation_split_id,
     )[0]
     return _LossMetrics(
         training_samples=point.training_samples,
@@ -698,6 +705,7 @@ def train_network_tensor_milestones(
     strategy_targets: bool,
     validation_fraction: float,
     max_gradient_norm: float | None,
+    validation_split_id: str = "sample",
     milestone_callback: Callable[[NetworkFitPoint], None] | None = None,
 ) -> tuple[NetworkFitPoint, ...]:
     """Train continuously and evaluate one fixed split at cumulative update milestones."""
@@ -720,7 +728,11 @@ def train_network_tensor_milestones(
     optimiser = torch.optim.Adam(network.parameters(), lr=learning_rate)
     generator = torch.Generator().manual_seed(data_seed)
     training_indices, validation_indices = _split_training_indices(
-        len(states), validation_fraction, generator
+        states,
+        action_masks,
+        validation_fraction,
+        generator,
+        validation_split_id=validation_split_id,
     )
     network_device = next(network.parameters()).device
     cuda_devices = (
@@ -856,16 +868,41 @@ def _fit_network(
 
 
 def _split_training_indices(
-    sample_count: int,
+    states: Tensor,
+    action_masks: Tensor,
     validation_fraction: float,
     generator: torch.Generator,
+    *,
+    validation_split_id: str,
 ) -> tuple[Tensor, Tensor]:
-    """Return one deterministic split with no overlap for the current fresh network."""
+    """Return one deterministic sample- or information-state-grouped split."""
+    sample_count = len(states)
     indices = torch.randperm(sample_count, generator=generator)
     if sample_count < 2 or validation_fraction == 0.0:
         return indices, torch.empty(0, dtype=torch.int64)
-    validation_count = min(sample_count - 1, max(1, int(sample_count * validation_fraction)))
-    return indices[validation_count:], indices[:validation_count]
+    if validation_split_id == "sample":
+        validation_count = min(sample_count - 1, max(1, int(sample_count * validation_fraction)))
+        return indices[validation_count:], indices[:validation_count]
+    if validation_split_id != "holdem_information_state":
+        raise ValueError("validation_split_id is unsupported")
+
+    state_values = states.detach().cpu().numpy()
+    mask_values = action_masks.detach().cpu().numpy()
+    threshold = int(validation_fraction * (1 << 64))
+    seed = generator.initial_seed().to_bytes(8, byteorder="big", signed=False)
+    validation = np.empty(sample_count, dtype=np.bool)
+    for index, (state, mask) in enumerate(zip(state_values, mask_values, strict=True)):
+        digest = blake2b(digest_size=8, person=b"ac_cfr_split_v1")
+        digest.update(seed)
+        digest.update(memoryview(np.ascontiguousarray(state)).cast("B"))
+        digest.update(memoryview(np.ascontiguousarray(mask)).cast("B"))
+        validation[index] = int.from_bytes(digest.digest(), "big") < threshold
+    if not validation.any() or validation.all():
+        raise RuntimeError("grouped validation split produced an empty partition")
+    return (
+        torch.from_numpy(np.flatnonzero(~validation)),
+        torch.from_numpy(np.flatnonzero(validation)),
+    )
 
 
 def _bounded_evaluation_indices(indices: Tensor, batch_size: int) -> Tensor:

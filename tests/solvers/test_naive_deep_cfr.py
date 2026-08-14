@@ -12,6 +12,7 @@ from ac_cfr.games.tree import IndexedGameTree, compile_game_tree
 from ac_cfr.models import build_deep_cfr_network
 from ac_cfr.solvers.naive_deep_cfr import (
     NaiveDeepCFR,
+    _split_training_indices,
     _train_network_tensors,
     deep_cfr_regret_matching,
     linear_cfr_loss,
@@ -247,3 +248,27 @@ def test_milestone_observation_preserves_one_continuous_training_run() -> None:
         baseline.parameters(), observed.parameters(), strict=True
     ):
         assert torch.equal(baseline_parameter, observed_parameter)
+
+
+def test_grouped_validation_split_keeps_identical_information_states_together() -> None:
+    states = torch.zeros((40, 201), dtype=torch.float32)
+    masks = torch.ones((40, 3), dtype=torch.bool)
+    for group in range(20):
+        states[group * 2 : group * 2 + 2, group % 2] = 1.0
+        states[group * 2 : group * 2 + 2, 8 + group % 4] = 1.0
+        states[group * 2 : group * 2 + 2, 16 + group] = 1.0
+
+    training, validation = _split_training_indices(
+        states,
+        masks,
+        0.5,
+        torch.Generator().manual_seed(20260811),
+        validation_split_id="holdem_information_state",
+    )
+    training_indices = set(training.tolist())
+    validation_indices = set(validation.tolist())
+
+    assert training_indices.isdisjoint(validation_indices)
+    assert training_indices | validation_indices == set(range(len(states)))
+    for first in range(0, len(states), 2):
+        assert (first in validation_indices) == (first + 1 in validation_indices)
