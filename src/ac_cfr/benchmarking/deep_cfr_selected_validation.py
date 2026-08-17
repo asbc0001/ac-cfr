@@ -60,7 +60,7 @@ class _PlannedInterruption(RuntimeError):
 
 
 def run_deep_cfr_selected_validation(
-    output_directory: Path = Path("results/deep_cfr"),
+    output_directory: Path = Path("results/leduc_deep_cfr"),
     *,
     runs_root: Path = Path("runs"),
     preset_path: Path = SELECTED_PRESET,

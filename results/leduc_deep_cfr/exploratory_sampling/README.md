@@ -1,16 +1,16 @@
 # Importance-corrected exploratory sampling on Leduc
 
-This experiment samples Leduc opponent actions from `q = 0.9 sigma + 0.1 uniform` and corrects the distribution shift with importance weights.
+This experiment mixes the current Leduc policy (`sigma`) with 10% uniform exploration, producing the sampling policy `q = 0.9 sigma + 0.1 uniform`. Importance weights correct the resulting distribution shift.
 
 - Estimator validation: **PASS**
-- Matched three-seed training gate: **FAIL**
-- Modified-HULHE runs: **NOT RUN**
+- Matched three-seed training comparison: **FAIL**
+- Exploratory modified-HULHE runs: **COMPLETE; NOT SELECTED**
 
-Only opponent sampling changes. Chance sampling and traverser expansion are unchanged; local `sigma/q` ratios correct returns, cumulative prefix ratios weight samples, strategy memory stores `sigma`, and reservoir replacement remains uniform.
+Only opponent sampling changes. Chance sampling and the updating player's action expansion are unchanged; `sigma/q` ratios correct returns and sample weights, strategy memory stores the true policy, and replacement in the bounded training memories remains uniform.
 
 The 100,000-sample estimator check against the complete Leduc tree passed:
 
-| Measurement | Result | Gate |
+| Measurement | Result | Acceptance threshold |
 |---|---:|---:|
 | Advantage reach-weighted RMSE | 0.109384 | <= 0.15 |
 | Strategy-memory reach-weighted RMSE | 0.002441 | <= 0.005 |
@@ -26,6 +26,6 @@ The matched experiment used three seeds, 20 iterations and 1,000 traversals per 
 | 20260812 | 1.161080 | 1.281205 |
 | 20260813 | 1.107745 | 1.072531 |
 
-Median exploitability improved slightly, but only one paired seed improved, so the declared Leduc gate failed. The estimator remains validated; a modified-HULHE-specific hypothesis would require a separate predeclared test.
+Median exploitability improved slightly, but only one paired seed improved instead of the required two. The estimator remained validated. The later [modified-HULHE experiment](../../modified_hulhe/exploratory_sampling/) did not justify exploratory sampling for the final run.
 
 Evidence: [`estimator_validation.json`](estimator_validation.json), [`training_results.csv`](training_results.csv), [`training_summary.csv`](training_summary.csv), and [`validation.json`](validation.json).

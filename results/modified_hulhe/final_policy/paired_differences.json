@@ -1,0 +1,80 @@
+[
+  {
+    "bootstrap_resamples": 10000,
+    "confidence_interval_high": -2.65,
+    "confidence_interval_low": -27.4,
+    "confidence_interval_method": "seeded_paired_bootstrap_percentile",
+    "confidence_level": 0.95,
+    "duplicate_pairs": 10000,
+    "first_iteration": 210,
+    "first_minus_second_mbb_per_game": -15.0,
+    "opponent_id": "rule_based_v1",
+    "second_iteration": 180,
+    "seed": 20260811
+  },
+  {
+    "bootstrap_resamples": 10000,
+    "confidence_interval_high": 29.7,
+    "confidence_interval_low": 6.45,
+    "confidence_interval_method": "seeded_paired_bootstrap_percentile",
+    "confidence_level": 0.95,
+    "duplicate_pairs": 10000,
+    "first_iteration": 240,
+    "first_minus_second_mbb_per_game": 18.05,
+    "opponent_id": "rule_based_v1",
+    "second_iteration": 210,
+    "seed": 20260811
+  },
+  {
+    "bootstrap_resamples": 10000,
+    "confidence_interval_high": 15.95124999999998,
+    "confidence_interval_low": -9.45,
+    "confidence_interval_method": "seeded_paired_bootstrap_percentile",
+    "confidence_level": 0.95,
+    "duplicate_pairs": 10000,
+    "first_iteration": 240,
+    "first_minus_second_mbb_per_game": 3.05,
+    "opponent_id": "rule_based_v1",
+    "second_iteration": 180,
+    "seed": 20260811
+  },
+  {
+    "bootstrap_resamples": 10000,
+    "confidence_interval_high": 11.9,
+    "confidence_interval_low": -15.451249999999987,
+    "confidence_interval_method": "seeded_paired_bootstrap_percentile",
+    "confidence_level": 0.95,
+    "duplicate_pairs": 10000,
+    "first_iteration": 240,
+    "first_minus_second_mbb_per_game": -2.0,
+    "opponent_id": "rule_based_v1",
+    "second_iteration": 150,
+    "seed": 20260811
+  },
+  {
+    "bootstrap_resamples": 10000,
+    "confidence_interval_high": 32.501249999999985,
+    "confidence_interval_low": -0.35,
+    "confidence_interval_method": "seeded_paired_bootstrap_percentile",
+    "confidence_level": 0.95,
+    "duplicate_pairs": 10000,
+    "first_iteration": 240,
+    "first_minus_second_mbb_per_game": 16.1,
+    "opponent_id": "rule_based_v1",
+    "second_iteration": 100,
+    "seed": 20260811
+  },
+  {
+    "bootstrap_resamples": 10000,
+    "confidence_interval_high": -18.05,
+    "confidence_interval_low": -67.6,
+    "confidence_interval_method": "seeded_paired_bootstrap_percentile",
+    "confidence_level": 0.95,
+    "duplicate_pairs": 10000,
+    "first_iteration": 240,
+    "first_minus_second_mbb_per_game": -43.0,
+    "opponent_id": "uniform_random",
+    "second_iteration": 210,
+    "seed": 20260811
+  }
+]

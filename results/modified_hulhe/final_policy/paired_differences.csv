@@ -1,0 +1,7 @@
+opponent_id,first_iteration,second_iteration,duplicate_pairs,seed,first_minus_second_mbb_per_game,confidence_level,confidence_interval_method,confidence_interval_low,confidence_interval_high,bootstrap_resamples
+rule_based_v1,210,180,10000,20260811,-15.0,0.95,seeded_paired_bootstrap_percentile,-27.4,-2.65,10000
+rule_based_v1,240,210,10000,20260811,18.05,0.95,seeded_paired_bootstrap_percentile,6.45,29.7,10000
+rule_based_v1,240,180,10000,20260811,3.05,0.95,seeded_paired_bootstrap_percentile,-9.45,15.95124999999998,10000
+rule_based_v1,240,150,10000,20260811,-2.0,0.95,seeded_paired_bootstrap_percentile,-15.451249999999987,11.9,10000
+rule_based_v1,240,100,10000,20260811,16.1,0.95,seeded_paired_bootstrap_percentile,-0.35,32.501249999999985,10000
+uniform_random,240,210,10000,20260811,-43.0,0.95,seeded_paired_bootstrap_percentile,-67.6,-18.05,10000

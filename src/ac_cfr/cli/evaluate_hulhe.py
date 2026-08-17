@@ -74,7 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--results",
         type=Path,
-        default=Path("results/modified_hulhe/h2h.csv"),
+        default=Path("runs/modified-hulhe-evaluation/h2h.csv"),
     )
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     arguments = parser.parse_args(argv)

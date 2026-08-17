@@ -1,0 +1,84 @@
+{
+  "checkpoint_io_stall_iterations_over_2x_median": [
+    21,
+    22,
+    69,
+    70,
+    74,
+    95,
+    103,
+    108,
+    136,
+    146,
+    147,
+    149,
+    152,
+    168,
+    171,
+    172,
+    175,
+    186,
+    188,
+    190,
+    194,
+    202,
+    205,
+    207,
+    210,
+    214,
+    223,
+    238
+  ],
+  "completed_iteration": 240,
+  "configured_iterations": 240,
+  "final_losses": {
+    "player_one_advantage_training_loss": 22.517534255981445,
+    "player_one_advantage_validation_loss": 23.69915008544922,
+    "player_zero_advantage_training_loss": 10.59327507019043,
+    "player_zero_advantage_validation_loss": 11.950277328491211,
+    "strategy_training_loss": 0.2266131341457367,
+    "strategy_validation_loss": 0.23635277152061462
+  },
+  "final_policy": {
+    "iteration": 240,
+    "selection": "Iteration 240 selected because it did not lose significantly to iterations 150, 180, or 210; there were not two consecutive late snapshots that both lost significantly to the same earlier candidate.",
+    "vs_random_mbb_per_game": 562.1500000000001,
+    "vs_rule_ci": [
+      125.99875000000002,
+      177.7
+    ],
+    "vs_rule_mbb_per_game": 151.7
+  },
+  "first_full_reservoir_iteration": {
+    "player_one_advantage": 73,
+    "player_zero_advantage": 169,
+    "strategy": 36
+  },
+  "iteration_metric_rows": 239,
+  "median_advantage_training_seconds": 318.2541176439263,
+  "median_iteration_seconds": 370.04597818898037,
+  "median_traversal_seconds": 15.84998010401614,
+  "minimum_effective_storage_remaining_gb": 100.073608882,
+  "missing_external_iteration_metric_rows": [
+    228
+  ],
+  "missing_row_reason": "iteration 228 checkpoint publication failed after internal metrics were saved and before the external timing row was appended",
+  "nonfinite_counts": {
+    "advantage_training_seconds": 0,
+    "cuda_peak_allocated_bytes": 0,
+    "cuda_peak_reserved_bytes": 0,
+    "elapsed_training_seconds": 0,
+    "free_disk_bytes": 0,
+    "iteration_seconds": 0,
+    "process_rss_bytes": 0,
+    "traversal_seconds": 0
+  },
+  "p95_iteration_seconds": 969.6455658102408,
+  "peak_cuda_allocated_mib": 295.46630859375,
+  "peak_cuda_reserved_mib": 614.0,
+  "peak_process_rss_gib": 13.439872741699219,
+  "run_id": "modified-hulhe-k10-u8-grouped",
+  "snapshot_count": 25,
+  "solver_training_hours": 23.216212268785522,
+  "total_traversals": 4800000
+}

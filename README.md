@@ -93,9 +93,9 @@ Across three matched repetitions, optimised Deep CFR took a median `1.48` second
 Detailed configurations, full-precision tables, plots, raw repetitions, memory results, and profiler output are available in:
 
 - [CFR/CFR+ correctness and performance results](results/cfr_cfr_plus/README.md)
-- [MCCFR validation and performance results](results/mccfr/README.md)
-- [Deep CFR validation, performance, and final-policy results](results/deep_cfr/README.md)
-- [Modified-HULHE cloud calibration and worker-scaling results](results/modified_hulhe/README.md)
+- [Leduc MCCFR validation and performance results](results/leduc_mccfr/README.md)
+- [Leduc Deep CFR validation, performance, and final-policy results](results/leduc_deep_cfr/README.md)
+- [Modified-HULHE training and final-policy results](results/modified_hulhe/README.md)
 - [Final tabular policy results](results/tabular_policies/README.md)
 
 ## Training and policy artefacts

@@ -71,53 +71,53 @@ def main(argv: Sequence[str] | None = None) -> int:
             result_path = run_cfr_gate(output_directory, progress_callback=print)
             result_label = "gate"
         elif arguments.suite == "mccfr-validation":
-            output_directory = arguments.output or Path("results/mccfr")
+            output_directory = arguments.output or Path("results/leduc_mccfr")
             result_path = run_mccfr_validation(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "validation"
         elif arguments.suite == "mccfr-gate":
-            output_directory = arguments.output or Path("results/mccfr")
+            output_directory = arguments.output or Path("results/leduc_mccfr")
             result_path = run_mccfr_gate(output_directory, progress_callback=print)
             result_label = "gate"
         elif arguments.suite == "deep-cfr-reference":
-            output_directory = arguments.output or Path("results/deep_cfr")
+            output_directory = arguments.output or Path("results/leduc_deep_cfr")
             result_path = run_deep_cfr_reference_validation(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "validation"
         elif arguments.suite == "deep-cfr-profile":
-            output_directory = arguments.output or Path("results/deep_cfr")
+            output_directory = arguments.output or Path("results/leduc_deep_cfr")
             result_path = run_deep_cfr_profiling(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "profiling"
         elif arguments.suite == "deep-cfr-benchmark":
-            output_directory = arguments.output or Path("results/deep_cfr")
+            output_directory = arguments.output or Path("results/leduc_deep_cfr")
             result_path = run_deep_cfr_benchmark(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "benchmark"
         elif arguments.suite == "deep-cfr-comparison":
-            output_directory = arguments.output or Path("results/deep_cfr")
+            output_directory = arguments.output or Path("results/leduc_deep_cfr")
             result_path = run_deep_cfr_convergence_comparison(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "comparison"
         elif arguments.suite == "deep-cfr-sensitivity":
-            output_directory = arguments.output or Path("results/deep_cfr")
+            output_directory = arguments.output or Path("results/leduc_deep_cfr")
             result_path = run_deep_cfr_sensitivity_study(
                 output_directory,
                 progress_callback=print,
             )
             result_label = "configuration study"
         elif arguments.suite == "deep-cfr-validation":
-            output_directory = arguments.output or Path("results/deep_cfr")
+            output_directory = arguments.output or Path("results/leduc_deep_cfr")
             result_path = run_deep_cfr_selected_validation(
                 output_directory,
                 progress_callback=print,

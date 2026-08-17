@@ -7,8 +7,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ac_cfr.evaluation.hulhe_plotting import (
+    plot_modified_hulhe_advantage_losses,
+    plot_modified_hulhe_batch_throughput,
+    plot_modified_hulhe_final_timing,
     plot_modified_hulhe_generalisation,
     plot_modified_hulhe_h2h,
+    plot_modified_hulhe_network_fit,
+    plot_modified_hulhe_policy_progression,
+    plot_modified_hulhe_reservoir_growth,
+    plot_modified_hulhe_snapshot_progression,
+    plot_modified_hulhe_worker_scaling,
 )
 from ac_cfr.evaluation.plotting import (
     plot_exact_metric,
@@ -16,14 +24,24 @@ from ac_cfr.evaluation.plotting import (
     plot_training_diagnostics,
 )
 
+_MODIFIED_HULHE_PLOTTERS = {
+    "modified-hulhe-advantage-losses": plot_modified_hulhe_advantage_losses,
+    "modified-hulhe-batch-throughput": plot_modified_hulhe_batch_throughput,
+    "modified-hulhe-final-timing": plot_modified_hulhe_final_timing,
+    "modified-hulhe-generalisation": plot_modified_hulhe_generalisation,
+    "modified-hulhe-h2h": plot_modified_hulhe_h2h,
+    "modified-hulhe-network-fit": plot_modified_hulhe_network_fit,
+    "modified-hulhe-policy-progression": plot_modified_hulhe_policy_progression,
+    "modified-hulhe-reservoir-growth": plot_modified_hulhe_reservoir_growth,
+    "modified-hulhe-snapshot-progression": plot_modified_hulhe_snapshot_progression,
+    "modified-hulhe-worker-scaling": plot_modified_hulhe_worker_scaling,
+}
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Generate one plot from run directories or result files."""
     arguments_list = list(sys.argv[1:] if argv is None else argv)
-    if arguments_list[:1] in (
-        ["modified-hulhe-generalisation"],
-        ["modified-hulhe-h2h"],
-    ):
+    if arguments_list and arguments_list[0] in _MODIFIED_HULHE_PLOTTERS:
         return _plot_modified_hulhe(arguments_list[0], arguments_list[1:])
 
     parser = argparse.ArgumentParser(description="Plot exact strategy metrics from result CSVs.")
@@ -109,9 +127,6 @@ def _plot_modified_hulhe(mode: str, argv: list[str]) -> int:
     parser.add_argument("results", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     arguments = parser.parse_args(argv)
-    if mode == "modified-hulhe-generalisation":
-        plot_modified_hulhe_generalisation(arguments.results, arguments.output)
-    else:
-        plot_modified_hulhe_h2h(arguments.results, arguments.output)
+    _MODIFIED_HULHE_PLOTTERS[mode](arguments.results, arguments.output)
     print(f"plot: {arguments.output}")
     return 0

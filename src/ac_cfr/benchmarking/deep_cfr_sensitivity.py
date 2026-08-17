@@ -68,7 +68,7 @@ class DeepCFRSensitivityCase:
 
 
 def run_deep_cfr_sensitivity_study(
-    output_directory: Path = Path("results/deep_cfr"),
+    output_directory: Path = Path("results/leduc_deep_cfr"),
     *,
     preset_path: Path = BASELINE_PRESET,
     progress_callback: Callable[[str], None] | None = None,
