@@ -36,6 +36,8 @@ class DeepCFRTrainingConfig:
     optimizer_id: OptimizerId = OptimizerId.ADAM
     validation_split_id: str = "sample"
     opponent_exploration_epsilon: float = 0.0
+    # Compatibility-only field retained for completed zero-fallback checkpoints.
+    fallback_epsilon: float = 0.0
 
     def __post_init__(self) -> None:
         for name in (
@@ -72,6 +74,12 @@ class DeepCFRTrainingConfig:
             raise TypeError("opponent_exploration_epsilon must be a real number")
         if float(self.opponent_exploration_epsilon) not in (0.0, 0.1):
             raise ValueError("opponent_exploration_epsilon must be zero or 0.1")
+        if isinstance(self.fallback_epsilon, bool) or not isinstance(
+            self.fallback_epsilon, (int, float)
+        ):
+            raise TypeError("fallback_epsilon must be a real number")
+        if float(self.fallback_epsilon) != 0.0:
+            raise ValueError("fallback_epsilon must be zero")
         if self.opponent_exploration_epsilon > 0.0 and self.game_configuration_id not in {
             GameConfigurationId.LEDUC,
             GameConfigurationId.MODIFIED_HULHE,
@@ -158,11 +166,13 @@ class DeepCFRTrainingConfig:
             "game_configuration_id",
         }
         version_five_fields = version_four_fields | {"validation_split_id"}
-        current_fields = version_five_fields | {"opponent_exploration_epsilon"}
+        version_six_fields = version_five_fields | {"opponent_exploration_epsilon"}
+        current_fields = version_six_fields | {"fallback_epsilon"}
         if set(values) not in (
             legacy_fields,
             version_four_fields,
             version_five_fields,
+            version_six_fields,
             current_fields,
         ):
             raise ValueError("Deep CFR training configuration fields are incompatible")
@@ -176,6 +186,8 @@ class DeepCFRTrainingConfig:
             parsed["validation_split_id"] = "sample"
         if "opponent_exploration_epsilon" not in parsed:
             parsed["opponent_exploration_epsilon"] = 0.0
+        if "fallback_epsilon" not in parsed:
+            parsed["fallback_epsilon"] = 0.0
         snapshots = parsed["snapshot_iterations"]
         if not isinstance(snapshots, list):
             raise ValueError("snapshot_iterations must be stored as a list")

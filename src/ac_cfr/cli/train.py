@@ -44,13 +44,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments.resume is not None:
         if arguments.preflight:
             parser.error("--preflight cannot be combined with --resume")
+        if not is_deep_cfr and arguments.iterations is not None:
+            parser.error("--iterations can extend only a Deep CFR resume")
         if any(
             value is not None
             for value in (
                 arguments.game,
                 arguments.solver,
                 arguments.config,
-                arguments.iterations,
                 arguments.seed,
                 arguments.run_id,
                 arguments.runs_root,
@@ -85,6 +86,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with _termination_stop_request() as stop_event:
                 outcome = resume_deep_cfr_training(
                     arguments.resume,
+                    target_iterations=arguments.iterations,
                     progress_callback=report_progress,
                     stop_requested=stop_event.is_set,
                 )

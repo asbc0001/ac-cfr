@@ -49,6 +49,7 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
     assert config.validation_fraction == 0.1
     assert config.validation_split_id == "sample"
     assert config.opponent_exploration_epsilon == 0.0
+    assert config.fallback_epsilon == 0.0
     assert config.max_gradient_norm == 10.0
     assert config.dropout_probability == 0.0
     assert config.to_dict()["snapshot_iterations"] == [25, 100]
@@ -61,7 +62,10 @@ def test_deep_cfr_configuration_and_sample_schemas_are_explicit() -> None:
 
     legacy_values = config.to_dict()
     del legacy_values["opponent_exploration_epsilon"]
+    del legacy_values["fallback_epsilon"]
     assert DeepCFRTrainingConfig.from_dict(legacy_values) == config
+    with pytest.raises(ValueError, match="fallback_epsilon must be zero"):
+        replace(config, fallback_epsilon=0.1)
 
 
 def test_deep_cfr_toml_is_strict_and_cli_values_override_the_preset(

@@ -148,6 +148,24 @@ def test_deep_cfr_run_resumes_metrics_and_exports_exactly_evaluable_snapshots(
         resume_deep_cfr_training(resume_path)
 
 
+def test_deep_cfr_resume_can_extend_only_the_iteration_target(tmp_path: Path) -> None:
+    config = _run_config()
+    config = replace(
+        config,
+        training=replace(config.training, iterations=1, snapshot_iterations=()),
+    )
+    outcome = start_deep_cfr_training(config, runs_root=tmp_path)
+
+    resumed = resume_deep_cfr_training(outcome.latest_checkpoint, target_iterations=2)
+
+    assert resumed.final_iteration == 2
+    saved = json.loads((outcome.run_directory / "run_config.json").read_text(encoding="utf-8"))
+    assert saved["run_config"]["training"]["iterations"] == 2
+    tree = compile_game_tree(LeducGame(), LeducConfig())
+    loaded = load_deep_cfr_checkpoint(resumed.latest_checkpoint, tree)
+    assert loaded.solver.config.iterations == 2
+
+
 def test_deep_cfr_snapshot_rejects_incompatible_architecture(tmp_path: Path) -> None:
     outcome = start_deep_cfr_training(_run_config(), runs_root=tmp_path)
     path = outcome.run_directory / "strategy_snapshots" / "deep_cfr_workflow_test_iter_3.pt"

@@ -1,7 +1,7 @@
 """Reference external-sampling Deep CFR for Leduc poker."""
 
 from collections.abc import Callable, Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import blake2b
 from math import fsum, isfinite
 from random import Random
@@ -211,6 +211,28 @@ class NaiveDeepCFR:
     def config(self) -> DeepCFRTrainingConfig:
         """Return the immutable training configuration."""
         return self._config
+
+    def extend_iterations(self, iterations: int) -> None:
+        """Extend only the outer-iteration target of a recovered solver."""
+        if isinstance(iterations, bool) or not isinstance(iterations, int):
+            raise TypeError("iterations must be an integer")
+        if iterations <= self._config.iterations:
+            raise ValueError("iterations must exceed the configured target")
+
+        previous_target = self._config.iterations
+        if self._final_strategy_network is not None:
+            if previous_target in self._config.snapshot_iterations:
+                self._snapshot_networks[previous_target] = self._final_strategy_network
+            else:
+                self._training_metrics = [
+                    metric
+                    for metric in self._training_metrics
+                    if not (
+                        metric.iteration == previous_target and metric.network_role == "strategy"
+                    )
+                ]
+            self._final_strategy_network = None
+        self._config = replace(self._config, iterations=iterations)
 
     @property
     def runtime(self) -> DeepCFRRuntimeConfig:

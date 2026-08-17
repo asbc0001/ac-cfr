@@ -4,7 +4,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -184,6 +184,7 @@ def start_deep_cfr_training(
 def resume_deep_cfr_training(
     checkpoint_path: Path,
     *,
+    target_iterations: int | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     stop_requested: Callable[[], bool] | None = None,
 ) -> DeepCFRTrainingOutcome:
@@ -196,8 +197,36 @@ def resume_deep_cfr_training(
     loaded = load_deep_cfr_checkpoint(checkpoint_path, game, map_location="cpu")
     if config.run_id != loaded.metadata["run_id"]:
         raise ValueError("checkpoint run_id does not match run_config.json")
-    if config.training != loaded.solver.config:
-        raise ValueError("checkpoint training configuration does not match run_config.json")
+    checkpoint_training = loaded.solver.config
+    if config.training != checkpoint_training:
+        checkpoint_compatible_config = replace(
+            config.training,
+            iterations=checkpoint_training.iterations,
+        )
+        if (
+            checkpoint_compatible_config != checkpoint_training
+            or config.training.iterations <= checkpoint_training.iterations
+        ):
+            raise ValueError("checkpoint training configuration does not match run_config.json")
+        loaded.solver.extend_iterations(config.training.iterations)
+    if target_iterations is not None:
+        if isinstance(target_iterations, bool) or not isinstance(target_iterations, int):
+            raise TypeError("target_iterations must be an integer")
+        if target_iterations <= loaded.solver.iteration:
+            raise ValueError("target_iterations must exceed the recovered iteration")
+        if target_iterations < config.training.iterations:
+            raise ValueError("target_iterations cannot reduce the configured target")
+        if target_iterations > config.training.iterations:
+            loaded.solver.extend_iterations(target_iterations)
+            config = replace(
+                config,
+                training=replace(config.training, iterations=target_iterations),
+            )
+            _write_run_config(
+                run_directory / "run_config.json",
+                config,
+                code_revision(),
+            )
     if config.runtime != loaded.solver.runtime:
         raise ValueError("checkpoint runtime configuration does not match run_config.json")
     if config.implementation is not deep_cfr_implementation(loaded.solver):
