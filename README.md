@@ -2,13 +2,15 @@
 
 A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It includes reference and optimised CFR, CFR+, external-sampling MCCFR, and Deep CFR pipelines, plus a playable web demo.
 
+**Current status:** The final modified-HULHE Deep CFR run completed 240 iterations and selected iteration 240 as its playable policy. The web application is deployed at [ac-cfr-web-65ltbjsegq-nw.a.run.app](https://ac-cfr-web-65ltbjsegq-nw.a.run.app/). A fuller README update will follow.
+
 ## Current functionality
 
 - Complete Kuhn and Leduc engines with reference and optimised tabular solvers, plus Leduc Deep CFR.
 - Exact evaluation, resumable training, playable snapshots, plotting, and reproducible benchmarks.
 - Validated tabular and neural agents with a checksum-protected strategy registry.
-- Conventional and modified HULHE engines with compact cards, fast evaluation, and suit-canonical information states.
-- An ephemeral FastAPI and vanilla-JavaScript interface for playing against frozen policies.
+- Conventional and modified HULHE engines with compact cards, fast evaluation, suit-canonical information states, and a completed modified-HULHE Deep CFR policy.
+- A deployed FastAPI and vanilla-JavaScript interface for playing against frozen policies.
 
 ## CFR and CFR+
 
@@ -261,5 +263,3 @@ python tools/generate_holdem_evaluator.py
 Development uses a single `main` branch. Run the local checks before each direct commit or push; CI verifies every push to `main`.
 
 Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
-
-Next: publish the registered strategy artefacts, repeat the container gate with the final modified-HULHE policy, and deploy the demo.
