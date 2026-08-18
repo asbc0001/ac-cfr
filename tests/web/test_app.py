@@ -242,7 +242,7 @@ async def test_folded_holdem_hand_reveals_both_current_hand_labels() -> None:
 
 
 @pytest.mark.anyio
-async def test_temporary_holdem_neural_snapshot_plays_through_the_web_api(
+async def test_holdem_neural_snapshot_plays_through_the_web_api(
     tmp_path: Path,
 ) -> None:
     registry_path = _write_holdem_neural_registry(tmp_path)

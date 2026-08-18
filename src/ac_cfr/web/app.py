@@ -236,7 +236,7 @@ def create_app(
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """Run the initial single-worker Uvicorn development server."""
+    """Run the single-worker Uvicorn server."""
     parser = argparse.ArgumentParser(description="Serve the AC CFR poker demo API.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)

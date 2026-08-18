@@ -2,7 +2,6 @@
 
 import argparse
 import hashlib
-import os
 import tempfile
 import urllib.request
 from collections.abc import Sequence
@@ -129,7 +128,7 @@ def _install_entry(
                     _copy_limited(response, temporary, entry.file_size)
         if not _matches_registry(temporary_path, entry):
             raise ValueError(f"release asset failed integrity validation: {destination.name}")
-        os.replace(temporary_path, destination)
+        temporary_path.replace(destination)
         temporary_path = None
     finally:
         if temporary_path is not None:

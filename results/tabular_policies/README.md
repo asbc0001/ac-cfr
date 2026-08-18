@@ -32,4 +32,4 @@ Against Kuhn's known Player 0 equilibrium value of `-1/18`, CFR's error was appr
 
 The five selected snapshots are staged under ignored `artifacts/tabular/` paths and loaded through the strategy registry and `TabularAgent`. File sizes, SHA-256 checksums and compatibility metadata are recorded in [`configs/strategy_registry.json`](../../configs/strategy_registry.json).
 
-The registry still uses the temporary `local-tabular-final` release identifier. Publishing the policy files and replacing that identifier are deferred until release preparation. CFR/CFR+ used source revision `edc18f2e1dea52f3255f93d4e8612cb070bf2e83`; MCCFR provenance is in [`validation.json`](../leduc_mccfr/validation.json).
+The policy files are published in the `models-v1` release declared by the strategy registry. CFR/CFR+ used source revision `edc18f2e1dea52f3255f93d4e8612cb070bf2e83`; MCCFR provenance is in [`validation.json`](../leduc_mccfr/validation.json).
