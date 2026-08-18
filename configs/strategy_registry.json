@@ -110,7 +110,7 @@
       "action_space": "poker",
       "tree_digest": "01244b36f6e00a2c7249165c2419ee9f3271f383674460cb0118343df7e747d7",
       "artifact_schema_version": 1,
-      "release_id": "local-modified-hulhe-final",
+      "release_id": "models-v1",
       "file_size": 6729459,
       "sha256": "e08639c67dec0c20c0808409801a924358f3720b950b59562d29e5d42565fe23"
     },
@@ -137,7 +137,7 @@
       "action_space": "poker",
       "tree_digest": "01244b36f6e00a2c7249165c2419ee9f3271f383674460cb0118343df7e747d7",
       "artifact_schema_version": 1,
-      "release_id": "local-modified-hulhe-final",
+      "release_id": "models-v1",
       "file_size": 6729459,
       "sha256": "43cd83c1c3f0e7aa64814b73770be744a7dcb6593dffc09aa3e492cf9b7afd9d"
     },
@@ -164,7 +164,7 @@
       "action_space": "poker",
       "tree_digest": "01244b36f6e00a2c7249165c2419ee9f3271f383674460cb0118343df7e747d7",
       "artifact_schema_version": 1,
-      "release_id": "local-modified-hulhe-final",
+      "release_id": "models-v1",
       "file_size": 6729459,
       "sha256": "66bc075c154ecca70ccc54e3f5ec841de8f1be904aeda31011bb91358265f977"
     },
@@ -190,7 +190,7 @@
       "action_space": "poker",
       "tree_digest": "a5d31dfb0012a54882eb3c82e4b054e6fe9a096aae89be9db4cdb60a9a2f724a",
       "artifact_schema_version": 1,
-      "release_id": "local-tabular-final",
+      "release_id": "models-v1",
       "file_size": 928,
       "sha256": "290e95fc1829d7dc3d6717bfd3fde09f05e27aa42e4325c1135e94a696abd15f"
     },
@@ -216,7 +216,7 @@
       "action_space": "poker",
       "tree_digest": "a5d31dfb0012a54882eb3c82e4b054e6fe9a096aae89be9db4cdb60a9a2f724a",
       "artifact_schema_version": 1,
-      "release_id": "local-tabular-final",
+      "release_id": "models-v1",
       "file_size": 879,
       "sha256": "7f40bbe9daa0e29804281e7955d14f7d7c96b1ba4458c106d05d32f1386dc69e"
     },
@@ -242,7 +242,7 @@
       "action_space": "poker",
       "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
       "artifact_schema_version": 1,
-      "release_id": "local-tabular-final",
+      "release_id": "models-v1",
       "file_size": 5178,
       "sha256": "a47e5fa64c64a64a7953a8c4d21be11898119ab748d78fdbdb5f9d8619f344a2"
     },
@@ -268,7 +268,7 @@
       "action_space": "poker",
       "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
       "artifact_schema_version": 1,
-      "release_id": "local-tabular-final",
+      "release_id": "models-v1",
       "file_size": 4141,
       "sha256": "2838fa59bba8481d5006e337d4364d6aad0384c531234e9637af736b7f2a8d5d"
     },
@@ -294,7 +294,7 @@
       "action_space": "poker",
       "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
       "artifact_schema_version": 1,
-      "release_id": "local-tabular-final",
+      "release_id": "models-v1",
       "file_size": 14810,
       "sha256": "5086c0b8905c80a200ca520d031b2543d66b5ba9a766877f0ee79ab270e9b03d"
     },
@@ -320,7 +320,7 @@
       "action_space": "poker",
       "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
       "artifact_schema_version": 1,
-      "release_id": "local-deep-cfr-final",
+      "release_id": "models-v1",
       "file_size": 47565,
       "sha256": "9428a5350ddbc32937382282ec6e8e51e2652688d11304a8a73d46f23457fc68"
     },
@@ -346,7 +346,7 @@
       "action_space": "poker",
       "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
       "artifact_schema_version": 1,
-      "release_id": "local-deep-cfr-final",
+      "release_id": "models-v1",
       "file_size": 47565,
       "sha256": "9bd14f886d8b5a1d54efb3072ac3f04fe58363841dede493b583964ac7721d25"
     },
@@ -372,7 +372,7 @@
       "action_space": "poker",
       "tree_digest": "1877c59a1f3432b3dd131191c0580059cf29132b87d711d34873a85bfec8a5a2",
       "artifact_schema_version": 1,
-      "release_id": "local-deep-cfr-final",
+      "release_id": "models-v1",
       "file_size": 47565,
       "sha256": "836120f2f951f45af0a4ab53f9517889b68a040ba2544fa90ed2b066aae8f58a"
     }
