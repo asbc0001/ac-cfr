@@ -20,7 +20,11 @@ RUN python -m pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
 
 WORKDIR /app
 COPY configs ./configs
-RUN mkdir -p /app/artifacts && chown app:app /app/artifacts
+RUN mkdir -p /app/artifacts \
+    && ac-cfr-download-models \
+        --strategy-registry /app/configs/strategy_registry.json \
+        --project-root /app \
+    && chmod -R a=rX /app/artifacts
 USER app
 
 EXPOSE 8000

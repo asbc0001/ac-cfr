@@ -191,12 +191,10 @@ Build and run the same application in Docker with:
 
 ```bash
 docker build -t ac-cfr-web .
-docker run --rm --user "$(id -u):$(id -g)" -p 8000:8000 \
-    -v "$(pwd)/artifacts:/app/artifacts:ro" \
-    ac-cfr-web
+docker run --rm -p 8000:8000 ac-cfr-web
 ```
 
-The user mapping lets the non-root container read owner-only local snapshots without weakening their permissions. The image uses CPU-only PyTorch because the demo performs inference on CPU; cloud training retains its CUDA environment. The artefact mount is optional when using only random or rule-based opponents. The application uses one Uvicorn worker because hands are held temporarily in process memory.
+The build downloads the registry-pinned strategy snapshots, verifies their sizes and SHA-256 checksums, and makes them read-only in the final image. The container runs as a non-root user and uses CPU-only PyTorch because the demo performs inference on CPU; cloud training retains its CUDA environment. The application uses one Uvicorn worker because hands are held temporarily in process memory.
 
 ## Modified HULHE
 
