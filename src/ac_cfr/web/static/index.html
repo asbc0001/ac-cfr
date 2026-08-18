@@ -36,14 +36,10 @@
             </div>
             <label>
               Opponent
-              <select id="agent-select" disabled></select>
-            </label>
-            <label>
-              Policy
-              <select id="strategy-select" disabled></select>
+              <select id="opponent-select" disabled></select>
             </label>
           </div>
-          <p id="policy-details" class="policy-details" aria-live="polite"></p>
+          <p id="opponent-details" class="opponent-details" aria-live="polite"></p>
         </div>
         <button id="start-button" class="primary-button" type="button" disabled>
           New hand
@@ -93,6 +89,7 @@
               AI cards <span id="ai-position" class="position-badge"></span>
             </p>
             <div id="opponent-cards" class="card-row"></div>
+            <p id="opponent-hand" class="current-hand" hidden></p>
           </div>
         </div>
 

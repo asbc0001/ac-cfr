@@ -2,9 +2,8 @@
 
 const elements = {
   game: document.querySelector("#game-select"),
-  agent: document.querySelector("#agent-select"),
-  strategy: document.querySelector("#strategy-select"),
-  policyDetails: document.querySelector("#policy-details"),
+  opponent: document.querySelector("#opponent-select"),
+  opponentDetails: document.querySelector("#opponent-details"),
   rulesButton: document.querySelector("#rules-button"),
   rulesDialog: document.querySelector("#rules-dialog"),
   rulesTitle: document.querySelector("#rules-title"),
@@ -23,6 +22,7 @@ const elements = {
   currentHandLabel: document.querySelector("#current-hand"),
   boardCards: document.querySelector("#board-cards"),
   opponentCards: document.querySelector("#opponent-cards"),
+  opponentHandLabel: document.querySelector("#opponent-hand"),
   actions: document.querySelector("#action-buttons"),
   result: document.querySelector("#result"),
   showdownDetails: document.querySelector("#showdown-details"),
@@ -102,36 +102,29 @@ function setOptions(select, values, labelFor) {
   select.disabled = values.length === 0;
 }
 
-function strategiesForSelection() {
-  return strategies.filter(
-    (entry) => entry.game === elements.game.value && entry.algorithm === elements.agent.value,
-  );
-}
-
-function updateAgents() {
-  const agents = unique(
-    strategies
-      .filter((entry) => entry.game === elements.game.value)
-      .map((entry) => entry.algorithm),
-  );
-  setOptions(elements.agent, agents, (value) => algorithmLabels[value] ?? value);
-  elements.rulesButton.disabled = strategies.length === 0;
-  updatePolicies();
-}
-
-function updatePolicies() {
-  const available = strategiesForSelection();
+function updateOpponents() {
+  const available = strategies.filter((entry) => entry.game === elements.game.value);
   setOptions(
-    elements.strategy,
+    elements.opponent,
     available.map((entry) => entry.strategy_id),
     (strategyId) => available.find((entry) => entry.strategy_id === strategyId).label,
   );
+  elements.rulesButton.disabled = strategies.length === 0;
   elements.start.disabled = requestPending || available.length === 0;
-  renderPolicyDetails();
+  renderOpponentDetails();
 }
 
 function formatMetric(value) {
   return value.toLocaleString(undefined, { maximumSignificantDigits: 4 });
+}
+
+function formatHeadToHeadEvaluation(evaluation) {
+  if (typeof evaluation.value !== "number") {
+    return null;
+  }
+  const opponent = algorithmLabels[evaluation.opponent] ?? evaluation.opponent;
+  const label = typeof opponent === "string" ? `Evaluation vs ${opponent}` : "Evaluation";
+  return `${label}: ${formatMetric(evaluation.value)} ${evaluation.utility_unit}`;
 }
 
 function renderNetResult() {
@@ -142,7 +135,7 @@ function renderNetResult() {
 }
 
 function resetNetResult() {
-  trackedStrategyId = elements.strategy.value || null;
+  trackedStrategyId = elements.opponent.value || null;
   netResult = 0;
   completedHandCount = 0;
   completedHandIds.clear();
@@ -164,39 +157,39 @@ function recordTerminalResult() {
   renderNetResult();
 }
 
-function renderPolicyDetails() {
-  const selected = strategies.find((entry) => entry.strategy_id === elements.strategy.value);
+function renderOpponentDetails() {
+  const selected = strategies.find((entry) => entry.strategy_id === elements.opponent.value);
   if (selected === undefined) {
-    elements.policyDetails.textContent = "";
+    elements.opponentDetails.textContent = "";
     return;
   }
   if (selected.training_iteration > 0) {
     const details = [`Training iterations: ${selected.training_iteration.toLocaleString()}`];
     if (typeof selected.evaluation.exploitability === "number") {
       details.push(`Exact exploitability: ${formatMetric(selected.evaluation.exploitability)} chips`);
-    } else if (typeof selected.evaluation.value === "number") {
-      details.push(
-        `Evaluation: ${formatMetric(selected.evaluation.value)} ${selected.evaluation.utility_unit}`,
-      );
+    } else {
+      const evaluation = formatHeadToHeadEvaluation(selected.evaluation);
+      if (evaluation !== null) {
+        details.push(evaluation);
+      }
     }
-    elements.policyDetails.textContent = details.join(" · ");
+    elements.opponentDetails.textContent = details.join(" · ");
     return;
   }
   if (selected.algorithm === "rule_based_v1") {
-    const value = selected.evaluation.value;
-    const result = typeof value === "number" ? ` · vs random: +${formatMetric(value)} mbb/g` : "";
-    elements.policyDetails.textContent = `Fixed rule-based baseline${result}`;
+    const evaluation = formatHeadToHeadEvaluation(selected.evaluation);
+    const result = evaluation === null ? "" : ` · ${evaluation}`;
+    elements.opponentDetails.textContent = `Fixed rule-based baseline${result}`;
     return;
   }
-  elements.policyDetails.textContent = "Uniform random baseline · no training iterations";
+  elements.opponentDetails.textContent = "Uniform random baseline · no training iterations";
 }
 
 function setPending(pending) {
   requestPending = pending;
   elements.game.disabled = pending || strategies.length === 0;
-  elements.agent.disabled = pending || elements.agent.options.length === 0;
-  elements.strategy.disabled = pending || elements.strategy.options.length === 0;
-  elements.start.disabled = pending || elements.strategy.options.length === 0;
+  elements.opponent.disabled = pending || elements.opponent.options.length === 0;
+  elements.start.disabled = pending || elements.opponent.options.length === 0;
   elements.actions.querySelectorAll("button").forEach((button) => {
     button.disabled = pending;
   });
@@ -251,7 +244,7 @@ async function startHand() {
     await discardCurrentHand();
     currentHand = await apiRequest("/api/hands", {
       method: "POST",
-      body: JSON.stringify({ strategy_id: elements.strategy.value }),
+      body: JSON.stringify({ strategy_id: elements.opponent.value }),
     });
     if (trackedStrategyId !== currentHand.strategy_id) {
       resetNetResult();
@@ -485,6 +478,9 @@ function renderHand() {
     privateCardSlots,
     "hidden-card",
   );
+  const opponentHand = currentHand.terminal_summary?.opponent_hand ?? null;
+  elements.opponentHandLabel.textContent = opponentHand ?? "";
+  elements.opponentHandLabel.hidden = opponentHand === null;
   renderActions();
   renderAIDecision();
   renderHistory();
@@ -493,17 +489,12 @@ function renderHand() {
 }
 
 function handleGameChange() {
-  updateAgents();
+  updateOpponents();
   resetNetResult();
 }
 
-function handleAgentChange() {
-  updatePolicies();
-  resetNetResult();
-}
-
-function handleStrategyChange() {
-  renderPolicyDetails();
+function handleOpponentChange() {
+  renderOpponentDetails();
   resetNetResult();
 }
 
@@ -512,7 +503,7 @@ async function initialise() {
     strategies = await apiRequest("/api/strategies");
     const games = unique(strategies.map((entry) => entry.game));
     setOptions(elements.game, games, (value) => gameLabels[value] ?? value);
-    updateAgents();
+    updateOpponents();
     showStatus("");
   } catch (error) {
     showStatus(`Could not load playable policies: ${error.message}`, true);
@@ -520,8 +511,7 @@ async function initialise() {
 }
 
 elements.game.addEventListener("change", handleGameChange);
-elements.agent.addEventListener("change", handleAgentChange);
-elements.strategy.addEventListener("change", handleStrategyChange);
+elements.opponent.addEventListener("change", handleOpponentChange);
 elements.rulesButton.addEventListener("click", showGameRules);
 elements.start.addEventListener("click", startHand);
 initialise();

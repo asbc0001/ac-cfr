@@ -63,10 +63,18 @@ async def test_registry_exposes_only_the_curated_matrix_and_resolves_holdem_base
         "leduc_deep_cfr_final",
         "modified_hulhe_random",
         "modified_hulhe_rule_based_v1",
-        "modified_hulhe_deep_cfr_development",
+        "modified_hulhe_deep_cfr_early",
+        "modified_hulhe_deep_cfr_intermediate",
+        "modified_hulhe_deep_cfr_final",
     }
     assert "local_path" not in strategies["kuhn_cfr_final"]
     assert strategies["modified_hulhe_rule_based_v1"]["algorithm"] == "rule_based_v1"
+    assert strategies["modified_hulhe_deep_cfr_early"]["training_iteration"] == 20
+    assert strategies["modified_hulhe_deep_cfr_intermediate"]["training_iteration"] == 100
+    final_hulhe = strategies["modified_hulhe_deep_cfr_final"]
+    assert final_hulhe["training_iteration"] == 240
+    assert final_hulhe["evaluation"]["value"] == 151.7
+    assert final_hulhe["evaluation"]["opponent"] == "rule_based_v1"
     assert isinstance(registry.resolve("modified_hulhe_random").agent, BaselineAgent)
     assert isinstance(
         registry.resolve("modified_hulhe_rule_based_v1").agent,
@@ -88,19 +96,24 @@ async def test_browser_assets_are_served_without_persistent_client_state() -> No
     assert "rules-dialog" in page.text
     assert "How does this game work?" in page.text
     assert "https://github.com/asbc0001/ac-cfr" in page.text
-    assert "strategy-select" in page.text
-    assert "policy-details" in page.text
+    assert "opponent-select" in page.text
+    assert "opponent-details" in page.text
+    assert "strategy-select" not in page.text
     assert "net-result" in page.text
     assert "action-buttons" in page.text
     assert "opponent-cards" in page.text
+    assert "opponent-hand" in page.text
     assert "localStorage" not in script.text
     assert "sessionStorage" not in script.text
     assert "/api/strategies" in script.text
     assert "expected_version" in script.text
     assert "human_utility" in script.text
+    assert "opponentHandLabel" in script.text
     assert "completedHandIds" in script.text
     assert "Training iterations:" in script.text
     assert "Exact exploitability:" in script.text
+    assert "Evaluation vs" in script.text
+    assert "formatHeadToHeadEvaluation" in script.text
     assert 'rank === "T" ? "10" : rank' in script.text
     assert "Choose a policy and start a hand" not in script.text
     assert "—" not in page.text
@@ -187,6 +200,45 @@ async def test_inference_hand_advances_to_a_finite_terminal_result(strategy_id: 
     assert all(set(entry) == {"street", "actor", "action"} for entry in hand["action_history"])
     assert isinstance(hand["human_utility"], float)
     assert hand["result"]
+
+
+@pytest.mark.anyio
+async def test_folded_holdem_hand_reveals_both_current_hand_labels() -> None:
+    async with _client(_app(0)) as client:
+        hand = (
+            await client.post(
+                "/api/hands",
+                json={"strategy_id": "modified_hulhe_random"},
+            )
+        ).json()
+        for _ in range(20):
+            if hand["terminal"]:
+                break
+            action = next(
+                (candidate for candidate in hand["legal_actions"] if candidate["label"] == "Fold"),
+                None,
+            )
+            if action is None:
+                action = next(
+                    candidate
+                    for candidate in hand["legal_actions"]
+                    if candidate["label"] in {"Check", "Call"}
+                )
+            hand = (
+                await client.post(
+                    f"/api/hands/{hand['hand_id']}/actions",
+                    json={
+                        "expected_version": hand["state_version"],
+                        "action": action["action"],
+                    },
+                )
+            ).json()
+
+    summary = hand["terminal_summary"]
+    assert summary["reason"] == "fold"
+    assert summary["human_hand"] == hand["current_hand"]
+    assert summary["opponent_hand"]
+    assert summary["highlighted_cards"] == []
 
 
 @pytest.mark.anyio

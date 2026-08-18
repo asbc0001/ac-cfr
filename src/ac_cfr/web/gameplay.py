@@ -553,15 +553,15 @@ def _kuhn_terminal_summary(state: KuhnState, human_player: int) -> TerminalSumma
     assert state.private_cards is not None
     utility = state.utility(human_player)
     if state.action_history[-1] is Action.FOLD:
-        return _fold_summary(utility)
+        return _fold_summary(state, human_player)
     human_card = _KUHN_CARD_NAMES[state.private_cards[human_player]]
     opponent_card = _KUHN_CARD_NAMES[state.private_cards[1 - human_player]]
     winner_card = human_card if utility > 0 else opponent_card
     return TerminalSummary(
         reason="showdown",
         headline=f"{'You win' if utility > 0 else 'AI wins'} with {winner_card} high",
-        human_hand=f"{human_card} high",
-        opponent_hand=f"{opponent_card} high",
+        human_hand=f"High card: {human_card}",
+        opponent_hand=f"High card: {opponent_card}",
         highlighted_cards=(winner_card,),
     )
 
@@ -573,7 +573,7 @@ def _leduc_terminal_summary(
     assert state.private_cards is not None
     utility = state.utility(human_player)
     if state.folded_player is not None:
-        return _fold_summary(utility)
+        return _fold_summary(state, human_player)
     assert state.public_card is not None
     public_rank = leduc.card_rank(state.public_card)
     human_card = state.private_cards[human_player]
@@ -610,7 +610,7 @@ def _leduc_terminal_summary(
 def _holdem_terminal_summary(state: HoldemState, human_player: int) -> TerminalSummary:
     utility = state.utility(human_player)
     if state.folded_player is not None:
-        return _fold_summary(utility)
+        return _fold_summary(state, human_player)
     human_cards, human_strength = _best_holdem_hand(
         state.hole_cards[human_player],
         state.board_cards,
@@ -639,12 +639,13 @@ def _holdem_terminal_summary(state: HoldemState, human_player: int) -> TerminalS
     )
 
 
-def _fold_summary(utility: float) -> TerminalSummary:
+def _fold_summary(state: _GameState, human_player: int) -> TerminalSummary:
+    utility = state.utility(human_player)
     return TerminalSummary(
         reason="fold",
         headline="You win: AI folded" if utility > 0 else "AI wins: you folded",
-        human_hand=None,
-        opponent_hand=None,
+        human_hand=_current_hand_label(state, human_player),
+        opponent_hand=_current_hand_label(state, 1 - human_player),
         highlighted_cards=(),
     )
 

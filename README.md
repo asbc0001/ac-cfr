@@ -167,7 +167,7 @@ The current registry exposes:
 |---|---|
 | Kuhn | Random, final CFR, final CFR+ |
 | Leduc | Random, final CFR/CFR+/MCCFR, early/intermediate/final Deep CFR |
-| Modified HULHE | Random, rule-based, temporary local Deep CFR development snapshot |
+| Modified HULHE | Random, rule-based, early/intermediate/final Deep CFR |
 
 Install registry-declared strategy snapshots from a staged release directory with:
 
@@ -177,7 +177,7 @@ python download_models.py --source-directory /path/to/release-assets
 
 `ac-cfr-download-models` is the equivalent installed command. Without `--source-directory`, it fetches assets from the GitHub release tags recorded in the registry. Installation is atomic and requires the declared file size and SHA-256 checksum to match. Random and rule-based opponents require no downloaded file.
 
-The two-iteration modified-HULHE snapshot exists only for local interface development and provides no strategy-quality evidence. Its registry entry and artefact will be replaced after the final cloud policy is selected.
+The final modified-HULHE policy uses the selected iteration-240 snapshot documented in the [modified-HULHE results](results/modified_hulhe/README.md).
 
 Start the local single-worker application with:
 
@@ -264,4 +264,4 @@ Development uses a single `main` branch. Run the local checks before each direct
 
 Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
 
-Next: select and publish the final modified-HULHE policy, replace the temporary registry entry, repeat the completed container gate with that final artefact, and deploy the demo.
+Next: publish the registered strategy artefacts, repeat the container gate with the final modified-HULHE policy, and deploy the demo.
