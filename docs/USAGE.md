@@ -1,6 +1,6 @@
 # Usage and development
 
-Python 3.12 or later is required.
+Run commands from the repository root. Python 3.12 or later is required.
 
 ## Installation
 
@@ -10,149 +10,253 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-The installed commands are `ac-cfr-train`, `ac-cfr-benchmark`, `ac-cfr-evaluate`, `ac-cfr-plot-results`, `ac-cfr-download-models` and `ac-cfr-web`. Checkout-local Python wrappers are also provided for the main workflows.
+Installation provides the `ac-cfr-*` commands used below.
 
-## Training and resume
+## Released policies
 
-Start a tabular run with an explicit budget and snapshot milestones:
-
-```bash
-python train.py \
-    --game leduc \
-    --solver cfr_plus \
-    --iterations 500000 \
-    --run-id leduc-cfr-plus-final \
-    --evaluation-interval 5000 \
-    --checkpoint-interval 50000 \
-    --snapshot-iterations 50000,200000,500000 \
-    --averaging-delay 10 \
-    --plot
-```
-
-Resume from the stored configuration and solver state:
-
-```bash
-python train.py --resume runs/leduc-cfr-plus-final/checkpoints/latest.npz
-```
-
-Start or resume the selected Leduc Deep CFR preset:
-
-```bash
-python train.py \
-    --config configs/deep_cfr/leduc_final.toml \
-    --run-id leduc-deep-cfr-final
-
-python train.py --resume runs/leduc-deep-cfr-final/checkpoints/latest.pt
-```
-
-Tabular and neural checkpoints retain the state required for compatible resume. Playable strategy snapshots are smaller exports containing only the selected average policy and its reconstruction metadata.
-
-## Evaluation and plots
-
-Evaluate registered policies by strategy ID:
-
-```bash
-python evaluate.py leduc_cfr_plus_final
-python evaluate.py leduc_mccfr_final
-python evaluate.py leduc_deep_cfr_final
-```
-
-Plot one run or compare several runs:
-
-```bash
-python plot_results.py runs/leduc-cfr-final runs/leduc-cfr-plus-final
-```
-
-Run output belongs under ignored `runs/`, selected policy files under ignored `artifacts/`, and compact evidence under version-controlled `results/`.
-
-## Policy files
-
-Install every file-backed policy declared by the registry from its published release:
+Policy files are distributed separately from the repository. Install every file declared by the
+strategy registry:
 
 ```bash
 ac-cfr-download-models
 ```
 
-Release assets can instead be installed from a local staging directory:
+Install selected policies by repeating `--strategy-id`:
+
+```bash
+ac-cfr-download-models \
+    --strategy-id leduc_cfr_plus_final \
+    --strategy-id leduc_deep_cfr_final
+```
+
+Files can instead be installed from a local release staging directory:
 
 ```bash
 ac-cfr-download-models --source-directory /path/to/release-assets
 ```
 
-Installation is atomic and requires the declared file size and SHA-256 checksum to match. Random and rule-based agents require no policy file.
+The installer writes to `artifacts/` and verifies each file against the size and SHA-256 checksum
+in [`configs/strategy_registry.json`](../configs/strategy_registry.json). Random and rule-based
+policies have no associated files.
 
-## Web application
+## Evaluation
 
-After installing the registered policies, start the local single-worker application:
+### Kuhn and Leduc
+
+Registered Kuhn and Leduc policies support exact expected-value, NashConv and exploitability
+evaluation. Keep ad hoc output under `runs/` rather than modifying curated evidence:
+
+```bash
+ac-cfr-evaluate leduc_cfr_plus_final \
+    --results runs/local-evaluations.csv
+
+ac-cfr-evaluate leduc_deep_cfr_final \
+    --results runs/local-evaluations.csv
+```
+
+### Modified HULHE
+
+Modified HULHE is evaluated through duplicate-deal matches rather than exact exploitability. The
+following runs the final snapshot against the rule-based policy:
+
+```bash
+ac-cfr-evaluate modified-hulhe \
+    --snapshot artifacts/deep_cfr/modified-hulhe-deep-cfr-final.pt \
+    --include-rule-based \
+    --duplicate-pairs 1000 \
+    --seed 20260811 \
+    --confidence-level 0.95 \
+    --bootstrap-resamples 1000 \
+    --results runs/modified-hulhe-evaluation.csv
+```
+
+Repeat `--snapshot` for a progression round-robin, or use `--anchor-snapshot` for fixed snapshot
+opponents. Larger duplicate-pair and bootstrap counts reduce sampling variation at additional
+runtime cost. The resulting measurements are opponent-specific and are not exploitability
+estimates.
+
+## Local web application
+
+Install the released policies, then start the single-process application:
 
 ```bash
 ac-cfr-web --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000`. Hands are intentionally stored in one process and disappear when the page is refreshed or the server restarts.
+Open `http://127.0.0.1:8000`. Hands are held in process memory and are lost on refresh or server
+restart.
 
-The production Docker image downloads and verifies all registered policy files during its build:
-
-```bash
-docker build -t ac-cfr-web:models-v1 .
-docker run --rm -p 8000:8000 ac-cfr-web:models-v1
-```
-
-The image listens on port 8000, runs as a non-root user and uses CPU-only PyTorch.
-
-## Cloud Run deployment
-
-Set the target project, region and repository:
+To run the production image locally:
 
 ```bash
-PROJECT_ID="your-project-id"
-REGION="europe-west2"
-REPOSITORY="ac-cfr"
-IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/web:models-v1"
+docker build -t ac-cfr-web:local .
+docker run --rm -p 8000:8000 ac-cfr-web:local
 ```
 
-Enable Artifact Registry and Cloud Run, then create the Docker repository once:
+The build downloads and verifies the registered policies. The final image runs as a non-root
+user with CPU-only PyTorch and listens on port 8000.
+
+## Training
+
+### Run output
+
+Each job writes to `runs/<run-id>/`:
+
+```text
+runs/<run-id>/
+├── run_config.json
+├── metrics.csv
+├── summary.txt
+├── checkpoints/
+└── strategy_snapshots/
+```
+
+Checkpoints contain the complete state needed for compatible resume. Strategy snapshots contain
+the average policy and reconstruction metadata used for evaluation and play. Training handles
+`Ctrl+C` and termination requests at iteration boundaries; resume from the reported `latest`
+checkpoint.
+
+### Tabular CFR, CFR+ and MCCFR
+
+Example Kuhn CFR+ run:
 
 ```bash
-gcloud services enable \
-    artifactregistry.googleapis.com \
-    run.googleapis.com \
-    --project "${PROJECT_ID}"
-
-gcloud artifacts repositories create "${REPOSITORY}" \
-    --repository-format docker \
-    --location "${REGION}" \
-    --project "${PROJECT_ID}"
+ac-cfr-train \
+    --game kuhn \
+    --solver cfr_plus \
+    --iterations 10000 \
+    --run-id example-kuhn-cfr-plus \
+    --evaluation-interval 1000 \
+    --checkpoint-interval 2500 \
+    --snapshot-iterations 1000,5000,10000 \
+    --averaging-delay 10 \
+    --plot
 ```
 
-Authenticate Docker, tag the production image and push it:
+The optimised `cfr` and `cfr_plus` solvers support Kuhn and Leduc; `mccfr` supports Leduc. The
+corresponding `naive_cfr`, `naive_cfr_plus` and `naive_mccfr` implementations are intended for
+correctness comparisons and are substantially slower.
+
+Resume a tabular run:
 
 ```bash
-gcloud auth configure-docker "${REGION}-docker.pkg.dev"
-docker tag ac-cfr-web:models-v1 "${IMAGE}"
-docker push "${IMAGE}"
+ac-cfr-train \
+    --resume runs/example-kuhn-cfr-plus/checkpoints/latest.npz
 ```
 
-Deploy the public service:
+Tabular resume uses the original configuration and total iteration budget. New-run options cannot
+be supplied alongside `--resume`.
+
+### Deep CFR on Leduc
+
+New Deep CFR runs require a TOML preset:
 
 ```bash
-gcloud run deploy ac-cfr-web \
-    --image "${IMAGE}" \
-    --project "${PROJECT_ID}" \
-    --region "${REGION}" \
-    --port 8000 \
-    --cpu 1 \
-    --memory 1Gi \
-    --min-instances 0 \
-    --max-instances 1 \
-    --allow-unauthenticated
+ac-cfr-train \
+    --config configs/deep_cfr/leduc_final.toml \
+    --run-id example-leduc-deep-cfr \
+    --plot
 ```
 
-The single-instance limit matches the application's in-memory hand model; zero minimum instances allows it to scale down while idle.
+`leduc_final.toml` is the selected 200-iteration workload, not a smoke test. Deep CFR command-line
+options can override preset values, although separate TOML files are preferable for experiments
+that need an auditable configuration.
 
-## Checks
+Resume from the latest checkpoint:
 
-Run the normal development checks before committing:
+```bash
+ac-cfr-train \
+    --resume runs/example-leduc-deep-cfr/checkpoints/latest.pt
+```
+
+Deep CFR resume can extend the target iteration count:
+
+```bash
+ac-cfr-train \
+    --resume runs/example-leduc-deep-cfr/checkpoints/latest.pt \
+    --iterations 250
+```
+
+### Modified-HULHE Deep CFR
+
+Use the CPU smoke preset for a local lifecycle check:
+
+```bash
+ac-cfr-train \
+    --config configs/deep_cfr/modified_hulhe_smoke.toml \
+    --run-id modified-hulhe-smoke \
+    --preflight
+
+ac-cfr-train \
+    --config configs/deep_cfr/modified_hulhe_smoke.toml \
+    --run-id modified-hulhe-smoke
+```
+
+Preflight validates paths, resources, device execution and one small traversal without creating
+the run. Production-scale modified-HULHE training requires deliberate GPU, storage and runtime
+planning. The completed experiment is documented in the
+[modified-HULHE results](../results/modified_hulhe/README.md).
+
+## Plotting
+
+Generate standard diagnostics for one run:
+
+```bash
+ac-cfr-plot-results runs/example-kuhn-cfr-plus
+```
+
+Compare exact exploitability against elapsed training time:
+
+```bash
+ac-cfr-plot-results \
+    runs/leduc-cfr \
+    runs/leduc-cfr-plus \
+    --metric exploitability \
+    --x-axis elapsed_training_seconds \
+    --output runs/plots/leduc-exploitability.png
+```
+
+Result-specific READMEs under [`results/`](../results/) include the commands used to regenerate
+committed figures from compact evidence.
+
+## Benchmarks and validation suites
+
+Run an individual tabular timing workload:
+
+```bash
+ac-cfr-benchmark \
+    --game kuhn \
+    --solver cfr_plus \
+    --iterations 10000 \
+    --repeats 5
+```
+
+Named suites reproduce the larger correctness, convergence, profiling and performance studies:
+
+```bash
+ac-cfr-benchmark \
+    --suite cfr-cfr-plus \
+    --output runs/benchmarks/cfr-cfr-plus
+```
+
+Some suites require substantial CPU, memory or GPU time. Supply an output directory under
+`runs/` for exploratory execution so committed evidence is not replaced. Use
+`ac-cfr-benchmark --help` for the available suites; their formal workloads and environments
+are described under `results/`.
+
+## File ownership
+
+| Path | Contents | Version-controlled |
+|---|---|---|
+| `configs/` | Game, training and strategy-registry configuration | Yes |
+| `results/` | Curated evidence, plots and result documentation | Yes |
+| `runs/` | Local metrics, checkpoints, snapshots and experiment output | No |
+| `artifacts/` | Downloaded or selected playable policies | No |
+
+Generated policies and checkpoints stay outside Git. The deterministic Hold'em evaluator tables
+under `src/ac_cfr/games/holdem/evaluator/data/` are committed package data.
+
+## Development checks
 
 ```bash
 ruff check .
@@ -161,16 +265,26 @@ pyright
 pytest
 ```
 
-The default suite excludes expensive evaluator tests. Run them separately when changing evaluator code or lookup data:
+The default test command excludes `slow`, `gpu`, `cloud` and `benchmark` tests. Run the slow
+evaluator checks when changing the evaluator or its tables:
 
 ```bash
 pytest -m slow
 ```
 
-CI also builds the wheel and production container and verifies installed command-line entry points outside the checkout.
+Build the wheel after packaging or entry-point changes:
 
-The Hold'em evaluator uses committed deterministic lookup tables. Regenerate them only when changing evaluator generation:
+```bash
+python -m build --wheel
+```
+
+Regenerate the deterministic Hold'em lookup tables only when changing their generation or
+evaluation logic:
 
 ```bash
 python tools/generate_holdem_evaluator.py
+pytest -m slow
 ```
+
+CI runs formatting, linting, type checking, the default tests, an installed-wheel smoke test,
+and a production-container build and health check.
