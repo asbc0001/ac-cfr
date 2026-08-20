@@ -1,169 +1,128 @@
 # AC CFR
 
-A research project for implementing, validating, and comparing counterfactual regret minimisation algorithms for two-player imperfect-information poker. It includes reference and optimised CFR, CFR+, external-sampling MCCFR, and Deep CFR pipelines, plus a playable web demo.
+A game-theoretic poker solver platform written in Python, with optimised implementations of CFR (counterfactual regret minimisation), CFR+, external-sampling MCCFR and Deep CFR. Solver policies were trained entirely through self-play on custom engines for Kuhn, Leduc and heads-up limit Hold'em.
 
-**Current status:** The final modified-HULHE Deep CFR run completed 240 iterations and selected iteration 240 as its playable policy. The web application is deployed at [ac-cfr-web-65ltbjsegq-nw.a.run.app](https://ac-cfr-web-65ltbjsegq-nw.a.run.app/). A fuller README update will follow.
+The project also includes a deployed web application for playing hands against the trained solver policies.
 
-## Current functionality
+[Play the deployed web demo](https://ac-cfr-web-65ltbjsegq-nw.a.run.app/)
 
-- Complete Kuhn and Leduc engines with reference and optimised tabular solvers, plus Leduc Deep CFR.
-- Exact evaluation, resumable training, playable snapshots, plotting, and reproducible benchmarks.
-- Validated tabular and neural agents with a checksum-protected strategy registry.
-- Conventional and modified HULHE engines with compact cards, fast evaluation, suit-canonical information states, and a completed modified-HULHE Deep CFR policy.
-- A deployed FastAPI and vanilla-JavaScript interface for playing against frozen policies.
+## Technologies
 
-## CFR and CFR+
+- **Solvers and evaluation:** Python, PyTorch, NumPy, Numba and Matplotlib
+- **Web:** FastAPI, HTML, CSS and JavaScript
+- **Testing and deployment:** pytest, GitHub Actions, Docker and Google Cloud Run
 
-An information set groups decision states that the acting player cannot distinguish using the information available to them. At each information set, CFR compares the value of the strategy it used with the value it would have received by choosing each legal action instead:
+## Key components
+
+- Self-play training pipelines for CFR and CFR+ on Kuhn and Leduc, external-sampling MCCFR on Leduc, and Deep CFR on Leduc and a modified version of heads-up limit Hold'em.
+- Custom Kuhn, Leduc and heads-up limit Hold'em engines, with indexed Kuhn and Leduc trees, compact on-demand Hold'em states, suit-isomorphic information states and a perfect-hash seven-card hand evaluator.
+- Exact best-response evaluation for Kuhn and Leduc, with duplicate-deal matches against fixed opponents and earlier snapshots for modified HULHE.
+- Optimised solver implementations achieve speedups of `27.3x` to `138.3x` for CFR, CFR+ and MCCFR and `6.55x` for Leduc Deep CFR compared with recursive baselines in controlled benchmarks.
+- Reproducible training with resumable checkpoints and scheduled policy snapshots for evaluation and play.
+- A containerised FastAPI and JavaScript web application deployed on Google Cloud Run for playing against the trained policies.
+
+## How it works
+
+### Games and information states
+
+The game engines hold the complete state of a hand, but solvers and playable agents receive only an information state: the acting player's cards, public cards and betting history. Opponent private cards never enter a policy decision. After training, each saved policy can be loaded through a common interface for exact evaluation, head-to-head matches and web play.
+
+Kuhn and Leduc are small enough to compile into dense trees with stable integer indices for nodes, information sets, actions and children. Hold'em is not, so its configurable engine creates compact states on demand. Suit-isomorphic Hold'em states share a deterministic encoding, reducing duplicate strategic representations without changing physical deal probabilities.
+
+At showdown, a direct perfect-hash evaluator maps seven cards to a `1..7462` hand rank, where 1 is strongest. Its committed lookup tables are generated deterministically and tested against both an evaluator that checks all 21 five-card combinations and the independent `phevaluator` library. The engine supports conventional heads-up limit Hold'em and the reduced game used for Deep CFR training.
+
+### CFR, CFR+ and MCCFR
+
+For each information set `I` and legal action `a`, CFR updates a cumulative regret score:
 
 ```text
 regret(I, a) += counterfactual reach × (action value(I, a) - strategy value(I))
 ```
 
-Counterfactual reach is the probability that chance and the opponent reach the decision. It excludes the updating player's probability, allowing every legal action to be evaluated as though that player had reached the decision. Regret matching normalises positive cumulative regrets into action probabilities, using a uniform strategy if none are positive.
+The action value is the expected result from choosing `a` at `I` and following the current strategy afterwards. The strategy value is the expected result under the current mix of actions at `I`. Counterfactual reach is the probability that card deals and the opponent's decisions lead to the information set, excluding the updating player's own earlier action probabilities. Regret matching normalises positive cumulative regrets into the next strategy, while accumulated strategies weighted by the player's reach form the average strategy used for evaluation and play.
 
-Each iteration updates Player 0 and then Player 1 through separate full-tree traversals with a policy frozen for each pass. Accumulated reach-weighted strategies form the average policy used for evaluation and play.
+CFR and CFR+ update each player through a separate full-tree pass, with the strategy held fixed for the duration of that pass. CFR+ prevents cumulative regrets from falling below zero and gives later strategies progressively more influence on the average strategy.
 
-CFR+ keeps the same traversal but clips updated cumulative regrets to zero and weights later average-policy contributions linearly after a configurable delay. This usually produces a strong average strategy in fewer iterations without changing the game or evaluation rules.
+External-sampling MCCFR performs one sampled traversal for each player per iteration. It samples card deals and opponent actions but explores every legal action available to the player being updated. One MCCFR iteration is therefore much cheaper than one full-tree CFR iteration. Their raw iteration counts are not directly comparable, and MCCFR quality is reported across fixed seeds because its sampled estimates can vary between runs.
 
-## External-sampling MCCFR
+### Deep CFR
 
-Full-tree CFR visits every chance and action branch on each traversal. External-sampling MCCFR reduces that work by sampling one chance outcome and one opponent action at each relevant decision while still exploring every action available to the player whose regrets are being updated.
+Deep CFR applies external-sampling CFR to games where storing regrets for every information set is impractical. Each player has a PyTorch advantage network that estimates how much better or worse each legal action is than the current strategy. Regret matching converts these estimates into the strategy used for the next traversals.
 
-Each outer iteration performs one sampled traversal for Player 0 and one for Player 1. Regrets are updated after each traversal, so the next traversal sees the latest strategy. Over many iterations, the sampled paths estimate the full update correctly on average, but individual runs are noisy. Strategy quality is therefore evaluated across several fixed seeds rather than from one favourable run.
+Each outer iteration collects a fixed number of sampled traversals for both players. Action-advantage targets enter a separate reservoir for each player, while the strategies encountered during traversal enter a shared strategy reservoir. A newly initialised advantage network is then trained for each player from the retained samples. Uniform reservoir sampling gives every observation seen so far an equal chance of being retained, while training gives samples from later iterations progressively more weight.
 
-One MCCFR iteration is much cheaper than one full-tree CFR iteration because it visits only part of the tree. Raw iteration counts therefore cannot rank CFR and MCCFR directly. Convergence over training time and fixed-workload throughput provide more meaningful comparisons.
+A separate strategy network is trained when a policy snapshot is exported. It approximates the average of the self-play strategies and supplies the saved policy used for evaluation and play; it does not guide training traversals. Training uses a fixed number of network updates, so its cost does not automatically grow as the reservoirs fill. Leduc uses a 37-value state encoding and three 64-unit hidden layers. Modified HULHE uses a 201-value encoding, 10-million-sample reservoirs and a larger GPU training configuration.
 
-## Deep CFR
+### Optimisation
 
-Deep CFR keeps MCCFR's sampled traversal but replaces regret and average-strategy tables with neural networks. Each player's advantage network predicts the relative value of every action; regret matching turns positive predictions into the current strategy, falling back to the highest prediction if none are positive. A separate shared strategy network learns the strategy history and becomes the playable average policy.
+CFR, CFR+, MCCFR and Leduc Deep CFR each have an independent recursive baseline for correctness and performance comparison. Deterministic updates are compared directly, while Deep CFR is assessed under matched training workloads.
 
-Each outer iteration gives both players `K` sampled traversals. Their targets enter bounded uniform reservoirs, where every sample seen has an equal chance of being retained. Fresh advantage networks train for fixed numbers of sampled minibatch updates, weighted by generating iteration under Linear CFR. Fixed update budgets stop neural-training cost growing automatically with reservoir size. Exported strategy networks train separately from the shared strategy reservoir and never feed back into traversal.
+- **Tabular CFR and CFR+:** flat reusable NumPy buffers propagate reach probabilities forward and node values backward through the indexed trees.
+- **MCCFR:** compact arrays record sampled paths without recursive Python traversal bookkeeping.
+- **Numba compilation:** repeated tabular loops run as compiled machine code; compilation is warmed before benchmarks.
+- **Deep CFR:** batched network inference, packed reservoirs and reusable traversal buffers reduce Python and network-call overhead.
+- **Modified-HULHE training:** 12 parallel workers collect traversal samples for central GPU training. Atomic checkpoints preserve models, reservoirs, independent random-number-generator streams and run progress.
 
-Leduc uses a versioned 37-value encoding of the acting player, cards, betting round, and action history. The selected network has three 64-unit ReLU hidden layers and three masked action outputs. Held-out losses, finite-value checks, and gradient clipping guard training; dropout remained disabled because validation showed no benefit.
+## Modified heads-up limit Hold'em
 
-The final preset uses 1,000 traversals and 1,000 advantage updates per player per iteration, 512-sample batches, and 100,000-sample reservoirs. The complete configuration is in [`configs/deep_cfr/leduc_final.toml`](configs/deep_cfr/leduc_final.toml).
+The modified game removes the pre-flop round. Play begins on the flop with each player having contributed one small bet, so the pot contains two small bets. The flop, turn and river follow normal heads-up fixed-limit position and bet sizing, but each street allows only an opening bet and one raise instead of the conventional cap of four betting actions. This reduces the training problem while retaining private cards, a complete five-card board, position and three betting rounds.
 
-## Implementations and optimisation
+Before states that differ only by suit are merged, counting the distinct card situations and betting histories gives an estimated `8.47e12` information states, compared with `3.19e14` for conventional HULHE. The maximum number of betting actions in a hand falls from 23 to 12. By this estimate, the modified game is about 38 times smaller, but its trillions of information states still make full-tree solution and exact exploitability evaluation impractical.
 
-Recursive Python tabular solvers provide an independent correctness baseline. Their optimised counterparts preserve the update order and mathematics while using:
+## Results
 
-- precomputed dense indexed trees with stable node, information-set, child, depth, and action indices;
-- compact flat NumPy arrays instead of nested Python objects and dictionaries in the hot path;
-- reusable value, regret, policy, sampling, and traversal buffers to avoid repeated allocation;
-- forward reach propagation and reverse node-value passes for full-tree CFR/CFR+;
-- compact sampled-action arrays and reusable arrays that record pending tree nodes instead of recursive Python calls for MCCFR; and
-- a cached Numba-compiled training kernel that moves the repeated numerical loops into machine code.
+### Kuhn and Leduc policies
 
-NumPy provides the arrays, while Numba compiles the training kernel into machine code. Benchmarks warm this compilation separately so it is not counted as solver training.
+Kuhn and Leduc are evaluated exactly by traversing every card deal and policy branch, then computing each player's best response while enforcing one action per information set. `NashConv` is the sum of both players' possible improvement from deviating; this project reports exploitability as `NashConv / 2`. Values are chips per hand, lower exploitability is better, and zero is a Nash equilibrium.
 
-Optimised Deep CFR batches network inference across pending traversal states, stores reservoir samples in packed arrays, and replaces recursive Python traversal bookkeeping with reusable indexed buffers. These changes reduce Python-visible calls and network invocations while preserving the algorithmic work and learning semantics used by the matched reference comparison.
-
-## Exact evaluation
-
-Kuhn and Leduc are evaluated without sampling. The evaluator traverses every chance outcome and action probability, then finds each best response while enforcing one action across each information set.
-
-All Kuhn and Leduc values use the games' base chip unit and are reported per hand. Each player antes 1 chip, so both games begin with a 2-chip pot. A Kuhn bet is 1 chip; Leduc bets are 2 chips in the first round and 4 chips in the second round.
-
-`NashConv` sums both players' possible improvement from switching individually to a best response. Exploitability is reported as `NashConv / 2`, so lower is better. At Kuhn equilibrium, Player 0 loses `1/18` of the 1-chip ante per hand, approximately `0.05556` chips or 5.56% of one ante. Leduc is validated through exact exploitability and agreement between independently structured solvers.
-
-## Validation and results
-
-The optimised CFR/CFR+ solvers matched reference regrets, strategy sums, and policies to an absolute tolerance of `1e-12` in all eight deterministic comparisons. MCCFR also matched its reference updates within `1e-12` when given identical sampled draws. Longer convergence checks and duplicate-deal, swapped-seat self-play passed for all three algorithms.
-
-| Game | Policy | Training budget / selected snapshot | Final exploitability | Fixed-benchmark speedup |
+| Game | Policy | Final run budget / selected snapshot | Exploitability | Reference-to-optimised speedup |
 |---|---|---:|---:|---:|
 | Kuhn | CFR | 100,000 | 0.00001719 | 27.3x |
 | Kuhn | CFR+ | 100,000 | 0.00000215 | 27.5x |
 | Leduc | CFR | 500,000 | 0.00014595 | 131.8x |
 | Leduc | CFR+ | 500,000 | 0.00000017 | 138.3x |
 | Leduc | MCCFR | 20,000,000 | 0.00450098 | 42.7x |
-| Leduc | Deep CFR | 200; selected 150 | 0.20564932 | 6.55x |
+| Leduc | Deep CFR | 200 iterations; selected 150 | 0.20564932 | 6.55x |
 
-Final CFR/CFR+ policies use larger budgets than their validation and benchmark workloads. Kuhn policies train for 100,000 iterations rather than 10,000. Leduc policies train for 500,000 rather than 5,000, with the larger budget chosen from CFR's measured convergence to pass the `0.0005` final-policy target.
+CFR and CFR+ reached near-Nash policies in both games. Five 20-million-iteration MCCFR runs finished between `0.00434` and `0.00508` exploitability. The median seed was selected for the playable policy instead of the best seed.
 
-MCCFR was trained to 20,000,000 iterations across five seeds. Median exact exploitability reached `0.004501`, below the established `0.005` validation ceiling. The seed with the median final result was selected rather than the best seed, avoiding a cherry-picked final policy. That policy is registered as `leduc_mccfr_final`.
+![Leduc CFR and CFR+ convergence](results/cfr_cfr_plus/plots/leduc_convergence.png)
 
-The final optimised Deep CFR run completed 200 outer iterations and 400,000 sampled traversals. Exact evaluation selected iteration 150 at `0.205649` exploitability instead of the weaker final snapshot. Iterations 20, 75, and 150 are registered as early, intermediate, and final policies. This validates the neural training and playable-policy lifecycle; it does not claim parity with the stronger tabular policies.
+Across three Leduc Deep CFR reference seeds, median exploitability fell from `3.4792` at iteration 1 to `1.7601` at iteration 10. Two runs of the selected configuration both fell below `0.45` by iteration 20. The final run completed 200 iterations and 400,000 traversals; iteration 150 was selected at `0.205649` because later snapshots were weaker. Iterations 20, 75 and 150 became the early, intermediate and final playable policies. This validates the neural training and policy-export pipeline, but does not claim parity with the stronger tabular policies.
 
-CFR/CFR+ benchmarks use 10,000 Kuhn and 5,000 Leduc iterations. The MCCFR benchmark uses 500,000 Leduc iterations, or 1,000,000 sampled traversals, giving the optimised workload more than one second of measured training. These tabular benchmarks use five fresh-process repetitions after Numba warm-up and record median runtime, variation, traversals per second, and peak process-tree memory.
+![Leduc Deep CFR convergence and diagnostics](results/leduc_deep_cfr/plots/final_policy_convergence.png)
 
-Optimised MCCFR completed its fixed workload in `1.248` seconds, compared with `53.240` seconds for the reference implementation, a `42.7x` speedup. Separate 100,000-iteration profiles show that the reference solver spends most of its time in recursive Python traversal, sampling, and policy normalisation. The optimised traversal runs inside the compiled Numba kernel, whose internal operations are not visible to Python's profiler.
+The speedups use fixed workloads rather than the final training budgets in the table. Tabular benchmarks used five fresh processes after Numba warm-up and excluded startup, evaluation, plotting and file writes. Optimised MCCFR completed one million sampled traversals in `1.248` seconds instead of `53.240`. Across three matched Leduc Deep CFR repetitions, the optimised solver took `1.48` seconds instead of `9.72`, used `15.4%` less peak process-tree memory and reduced traversal-time network calls from 30,315 to 365.
 
-Across three matched repetitions, optimised Deep CFR took a median `1.48` seconds versus `9.72` seconds for the reference implementation: `6.55x` faster with `15.4%` lower peak process-tree memory. Profiling reduced network calls from 30,315 to 365 and Python-visible calls from 19.3 million to 1.5 million. Single-process collection reached `7,997.6` traversals/second; the full final run averaged `519.4` once neural training and snapshot exports were included. These Leduc measurements are not a multi-process or modified-HULHE forecast.
+### Modified-HULHE policy
 
-Detailed configurations, full-precision tables, plots, raw repetitions, memory results, and profiler output are available in:
+The final modified-HULHE run completed 240 iterations and 4.8 million traversals, recording 23.22 hours of solver training on an NVIDIA A100-SXM4-80GB. Exact exploitability is not tractable for this game. Evaluation therefore used duplicate deals, playing each physical deal twice with the agents swapping seats to reduce positional and card variance.
 
-- [CFR/CFR+ correctness and performance results](results/cfr_cfr_plus/README.md)
-- [Leduc MCCFR validation and performance results](results/leduc_mccfr/README.md)
-- [Leduc Deep CFR validation, performance, and final-policy results](results/leduc_deep_cfr/README.md)
-- [Modified-HULHE training and final-policy results](results/modified_hulhe/README.md)
+Against the fixed rule-based agent, performance initially worsened from `-114.40 mbb/g` at iteration 1 to `-224.70 mbb/g` at iteration 5. It then recovered, became positive by iteration 40 and reached `151.70 mbb/g` at iteration 240, with a 95% paired-bootstrap confidence interval of `[126.00, 177.70]` for the final result. The selected policy also scored `562.15 mbb/g` against random, and direct snapshot matches placed it on the strongest observed late-training plateau. Each result used 10,000 duplicate pairs and one fixed evaluation seed.
+
+Here `mbb/g` means thousandths of one small bet won per game. These measurements show progress against specific opponents. They do not measure exploitability or establish proximity to a Nash equilibrium.
+
+![Modified-HULHE policy progression](results/modified_hulhe/final_policy/policy_progression.png)
+
+Detailed configurations, full-precision measurements, raw benchmark repetitions and plot-generation commands are in:
+
+- [CFR and CFR+ results](results/cfr_cfr_plus/README.md)
+- [Leduc MCCFR results](results/leduc_mccfr/README.md)
+- [Leduc Deep CFR results](results/leduc_deep_cfr/README.md)
+- [Modified-HULHE Deep CFR results](results/modified_hulhe/README.md)
 - [Final tabular policy results](results/tabular_policies/README.md)
 
-## Training and policy artefacts
+## Validation
 
-To produce a final policy, training runs to a fixed budget, exports average-policy snapshots, evaluates them, places the selected snapshot under `artifacts/`, and records its compatibility data and checksum in the registry. `TabularAgent` and `NeuralAgent` then expose frozen policies without depending on the trainer.
+The optimised CFR and CFR+ implementations matched their recursive references' regrets, strategy sums and policies to an absolute tolerance of `1e-12` in all eight deterministic comparisons. MCCFR matched reference updates to the same tolerance when both implementations received identical sampled draws. On a matched Leduc Deep CFR workload, final exact exploitabilities differed by `0.0299`, within the declared `0.1` behavioural tolerance.
 
-Start a training run with an explicit budget and snapshot milestones:
+Broader validation covers known game values, exact best responses, multi-seed convergence and duplicate-deal evaluation. Automated tests cover checkpoint continuation, reservoir sampling, legal-action masking, snapshot reconstruction, Hold'em rules and the seven-card evaluator. Same-policy duplicate-deal results were consistent with neutral play, serving as a symmetry check. Web tests play complete hands through the same public API used by the browser.
 
-```bash
-python train.py \
-    --game leduc \
-    --solver cfr_plus \
-    --iterations 500000 \
-    --run-id leduc-cfr-plus-final \
-    --evaluation-interval 5000 \
-    --checkpoint-interval 50000 \
-    --snapshot-iterations 50000,200000,500000 \
-    --averaging-delay 10 \
-    --plot
-```
+Compact, reviewable evidence is version-controlled under `results/`. Raw runs are stored under ignored `runs/`, and selected playable policies are stored under ignored `artifacts/`. Policies are distributed as GitHub Release assets; the strategy registry pins compatibility metadata, file size and SHA-256 checksum, all of which are checked before loading. GitHub Actions runs static checks, tests, an installed-package smoke test, and a container build and health check on every push to `main`.
 
-Resume the exact saved run configuration and state with:
+## Web application
 
-```bash
-python train.py --resume runs/leduc-cfr-plus-final/checkpoints/latest.npz
-```
-
-A checkpoint contains the state needed to resume training. A smaller strategy snapshot contains only the normalised average policy and compatibility metadata needed for evaluation or play.
-
-The same persistence infrastructure supports MCCFR. Its checkpoint also saves the chance and policy random-number generator states, so a resumed run continues with the same future samples.
-
-Deep CFR runs save their resolved TOML configuration. Checkpoints retain the networks, reservoirs, random-number-generator states, milestones, metrics, elapsed time, and architecture metadata needed for compatible resume. Smaller playable snapshots contain only the frozen average-strategy network and reconstruction metadata.
-
-Start or resume the final Leduc Deep CFR configuration with:
-
-```bash
-python train.py \
-    --config configs/deep_cfr/leduc_final.toml \
-    --run-id leduc-deep-cfr-final
-
-python train.py --resume runs/leduc-deep-cfr-final/checkpoints/latest.pt
-```
-
-Tabular snapshots use non-executable NumPy data loaded with `allow_pickle=False`. Deep CFR snapshots load only expected PyTorch weights, reconstruct a named architecture, disable gradients, mask illegal actions, and reject incompatible metadata or tensor shapes. Before constructing either agent, the registry verifies a trusted project-relative path, file size, SHA-256 checksum, game, encoding, action space, schema, and applicable tree or model compatibility identifiers.
-
-After the registered snapshot has been placed under its declared `artifacts/` path, evaluate it with:
-
-```bash
-python evaluate.py leduc_cfr_plus_final
-python evaluate.py leduc_mccfr_final
-python evaluate.py leduc_deep_cfr_final
-```
-
-Plot one run or compare several runs with:
-
-```bash
-python plot_results.py runs/leduc-cfr-final runs/leduc-cfr-plus-final
-```
-
-Run output stays under ignored `runs/`, selected snapshots under ignored `artifacts/`, and compact evidence under version-controlled `results/`.
-
-## Web demo
-
-The single-page FastAPI demo plays directly through the shared game engines and frozen `PlayableAgent` implementations. It never trains a solver during a request.
-
-The current registry exposes:
+The web application loads saved policies through the same agent interface used for evaluation. It never trains during a request.
 
 | Game | Playable opponents |
 |---|---|
@@ -171,95 +130,33 @@ The current registry exposes:
 | Leduc | Random, final CFR/CFR+/MCCFR, early/intermediate/final Deep CFR |
 | Modified HULHE | Random, rule-based, early/intermediate/final Deep CFR |
 
-Install registry-declared strategy snapshots from a staged release directory with:
+The browser receives only player-visible state. The server keeps active hands in memory under opaque random identifiers, and version checks reject stale or replayed actions. No hand state is stored in cookies, browser storage or a database. Refreshing clears the hand and temporary net result, whilst starting a new hand preserves the net result.
 
-```bash
-python download_models.py --source-directory /path/to/release-assets
-```
+The production image downloads and verifies the registered policies during its build, then runs as a non-root user with the model files read-only. Cloud Run uses one worker and one maximum instance because hands are stored in process memory, and scales the service to zero while idle.
 
-`ac-cfr-download-models` is the equivalent installed command. Without `--source-directory`, it fetches assets from the GitHub release tags recorded in the registry. Installation is atomic and requires the declared file size and SHA-256 checksum to match. Random and rule-based opponents require no downloaded file.
+## Running the project
 
-The final modified-HULHE policy uses the selected iteration-240 snapshot documented in the [modified-HULHE results](results/modified_hulhe/README.md).
+See the [usage and development guide](docs/USAGE.md) for installation, policy evaluation, local web and Docker execution, training and resume, plotting, benchmarks and development checks.
 
-Start the local single-worker application with:
-
-```bash
-ac-cfr-web --host 127.0.0.1 --port 8000
-```
-
-Then open `http://127.0.0.1:8000`. The selected game's concise rules are available from the table setup panel. The browser receives only player-visible state. Hands live temporarily in one server process, use opaque random identifiers and version-checked actions, and are not stored in cookies, browser storage or a database. Refreshing loses the current hand; **New hand** explicitly discards it before dealing another.
-
-Build and run the same application in Docker with:
-
-```bash
-docker build -t ac-cfr-web .
-docker run --rm -p 8000:8000 ac-cfr-web
-```
-
-The build downloads the registry-pinned strategy snapshots, verifies their sizes and SHA-256 checksums, and makes them read-only in the final image. The container runs as a non-root user and uses CPU-only PyTorch because the demo performs inference on CPU; cloud training retains its CUDA environment. The application uses one Uvicorn worker because hands are held temporarily in process memory.
-
-## Modified HULHE
-
-Modified HULHE begins on the flop with each player contributing one small bet to a two-small-bet pot. Flop, turn, and river use standard heads-up fixed-limit position and sizing, but each round allows only an opening bet and one raise.
-
-The same engine supports conventional HULHE from the pre-flop blinds with four betting levels per round. Modified HULHE is the production Deep CFR target.
-
-Cloud presets declare `storage_budget_bytes` as the usable persistent-storage ceiling for the run. Preflight uses the smaller of this configured budget and the backing filesystem's reported free space. Live metrics and checkpoint guards also subtract existing run files from the configured budget. The separate backing-filesystem value remains visible because shared filesystems may report capacity that is not allocated to the current machine. Memory checks use the effective cgroup limit rather than the host's physical-memory total.
-
-## Setup
-
-Python 3.12 or later is required.
-
-```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-```
-
-## Checks
-
-Run the normal development checks before committing:
-
-```bash
-ruff check .
-ruff format --check .
-pyright
-pytest
-```
-
-The default test suite excludes expensive tests marked as slow. Run the full evaluator checks separately when changing evaluator code or lookup data:
-
-```bash
-pytest -m slow
-```
-
-CI also verifies packaged evaluator data and command-line entry points outside the checkout.
-
-## Architecture
+## Repository layout
 
 ```text
 src/ac_cfr/
 ├── agents/          Frozen playable policies and baseline agents
-├── benchmarking/    Repeated timing, memory, profiling, and correctness gates
-├── common/          Configuration identifiers and deterministic RNG handling
-├── evaluation/      Exact best responses, metrics, self-play, and plotting
-├── games/           Kuhn, Leduc, Hold'em, and shared indexed-tree contracts
-├── persistence/     Checkpoints, snapshots, registry, and compact results
-├── solvers/         Reference and optimised CFR, CFR+, MCCFR, and Deep CFR
-├── training/        Reproducible tabular and neural training schedules
-└── web/             Ephemeral FastAPI gameplay and packaged browser assets
+├── benchmarking/    Timing, memory, profiling and correctness checks
+├── common/          Configuration identifiers and deterministic randomness
+├── evaluation/      Best responses, metrics, self-play and plotting
+├── games/           Kuhn, Leduc, Hold'em and shared game contracts
+├── persistence/     Checkpoints, snapshots, registry and compact results
+├── solvers/         Reference and optimised CFR, CFR+, MCCFR and Deep CFR
+├── training/        Tabular and neural training schedules
+└── web/             FastAPI gameplay and browser assets
 ```
 
-Game states hold complete hand data, while playable agents act through player-visible `InformationState` values. Solver strategies are also indexed by information set, preventing decisions from using hidden opponent cards. Kuhn and Leduc use precomputed trees; Hold'em uses compact on-demand transitions rather than pre-enumerating its full tree.
+## Possible future work
 
-The fast Hold'em evaluator uses reproducible packaged lookup tables validated against independent reference implementations. Regenerate them with:
-
-```bash
-python tools/generate_holdem_evaluator.py
-```
-
-## Repository conventions
-
-Development uses a single `main` branch. Run the local checks before each direct commit or push; CI verifies every push to `main`.
-
-Compact evidence belongs under `results/`, playable strategy snapshots under ignored `artifacts/`, and training output under ignored `runs/`. Small deterministic evaluator tables are committed, but generated policies and models remain outside Git history.
+- Implement and benchmark additional CFR-family solvers through the existing game and evaluation framework.
+- Compare algorithms under matched compute budgets and time-to-exploitability targets.
+- Extend Deep CFR experiments across traversal budgets, update budgets and network sizes.
+- Develop a stronger adversarial evaluator for modified HULHE, whose current head-to-head results do not establish low exploitability.
+- Scale the neural pipeline towards conventional HULHE if compute and evaluation costs permit.
